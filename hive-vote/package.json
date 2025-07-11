@@ -1,19 +1,14 @@
 {
-  "name": "nodejs",
+  "name": "hive-vote",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "@hiveio/hive-js": "^2.0.8",
-    "@types/node": "^22.13.11",
-    "body-parser": "^2.2.0",
-    "dotenv": "^17.2.0",
-    "express": "^5.1.0"
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2",
+    "dotenv": "^16.3.1",
+    "@hiveio/hive-js": "^0.8.9"
   }
 }
