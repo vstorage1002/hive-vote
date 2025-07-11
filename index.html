@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Hive Vote Tool</title>
+    <style>
+      body {
+        font-family: Arial;
+        margin: 50px;
+      }
+      input,
+      select,
+      button {
+        padding: 10px;
+        width: 320px;
+        margin-bottom: 10px;
+      }
+      #status {
+        margin-top: 10px;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Hive Blog Voter</h2>
+
+    <input type="text" id="linkInput" placeholder="Paste Hive post link here" />
+    <br />
+
+    <select id="weightSelect">
+      <option value="2500">25%</option>
+      <option value="5000">50%</option>
+      <option value="7500">75%</option>
+      <option value="10000" selected>100%</option>
+    </select>
+    <br />
+
+    <button onclick="vote()">Vote</button>
+
+    <p id="status"></p>
+
+    <script>
+      async function vote() {
+        const link = document.getElementById("linkInput").value;
+        const weight = document.getElementById("weightSelect").value;
+
+        const response = await fetch("/vote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ link, weight }),
+        });
+
+        const result = await response.text();
+        document.getElementById("status").innerText = result;
+      }
+    </script>
+  </body>
+</html>
