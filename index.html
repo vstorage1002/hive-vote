@@ -80,6 +80,11 @@
         font-style: italic;
         color: #999;
       }
+
+      .highlight {
+        color: #00bfff;
+        font-weight: bold;
+      }
     </style>
   </head>
   <body>
@@ -136,7 +141,9 @@
         const logContainer = document.getElementById("logContainer");
         const entry = document.createElement("div");
         entry.className = "log-entry";
-        entry.innerText = `${new Date().toLocaleTimeString()} - ${link} [${weight / 100}%]`;
+        const usernameMatch = link.match(/@([^/]+)/);
+        const username = usernameMatch ? usernameMatch[1] : "unknown";
+        entry.innerHTML = `${new Date().toLocaleTimeString()} - <span class="highlight">@${username}</span>/${link.split('/').pop()} [${weight / 100}%]`;
         logContainer.prepend(entry);
       }
 
@@ -159,7 +166,7 @@
           logs.forEach(log => {
             const entry = document.createElement("div");
             entry.className = "log-entry";
-            entry.innerText = `${new Date(log.timestamp).toLocaleString()} - @${log.author}/${log.permlink} [${log.weight}%]`;
+            entry.innerHTML = `${new Date(log.timestamp).toLocaleString()} - <span class="highlight">@${log.author}</span>/${log.permlink} [${log.weight}%]`;
             document.getElementById("logContainer").appendChild(entry);
           });
         } catch {
