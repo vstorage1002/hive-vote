@@ -45,16 +45,13 @@ app.get('/account', (req, res) => {
     const acct = result[0];
     const votingPowerPct = acct.voting_power / 100;
 
-    const currentMana = parseFloat(acct.voting_manabar.current_mana);
-    const maxMana = parseFloat(acct.vesting_shares) * 1e6;
-    const votingManaPct = Math.min(100, (currentMana / maxMana) * 100);
-
     res.json({
-      voting_power: votingPowerPct.toFixed(2) + '%',
-      voting_mana: votingManaPct.toFixed(2) + '%'
+      username: HIVE_USER,
+      voting_power: votingPowerPct.toFixed(2) + '%'
     });
   });
 });
+
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running on port ${port}`));
