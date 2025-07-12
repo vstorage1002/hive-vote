@@ -95,9 +95,9 @@
         <input type="text" id="linkInput" placeholder="Paste Hive post link here" />
         <select id="weightSelect">
           <option value="2500">25%</option>
-          <option value="5000" selected>50%</option>
+          <option value="5000">50%</option>
           <option value="7500">75%</option>
-          <option value="10000">100%</option>
+          <option value="10000" selected>100%</option>
         </select>
 
         <button onclick="vote()">Vote</button>
@@ -167,7 +167,15 @@
           logs.forEach(log => {
             const entry = document.createElement("div");
             entry.className = "log-entry";
-            const timePH = new Date(log.timestamp).toLocaleString('en-PH', { timeZone: 'Asia/Manila' });
+
+            // Convert to UTC Date then format to PH time
+            const utcDate = new Date(log.timestamp + 'Z'); // enforce UTC
+            const timePH = utcDate.toLocaleString('en-PH', {
+              timeZone: 'Asia/Manila',
+              dateStyle: 'medium',
+              timeStyle: 'short'
+            });
+
             entry.innerHTML = `${timePH} - <span class="highlight">@${log.author}</span>/${log.permlink} [${log.weight}%]`;
             document.getElementById("logContainer").appendChild(entry);
           });
