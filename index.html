@@ -95,9 +95,9 @@
         <input type="text" id="linkInput" placeholder="Paste Hive post link here" />
         <select id="weightSelect">
           <option value="2500">25%</option>
-          <option value="5000">50%</option>
+          <option value="5000" selected>50%</option>
           <option value="7500">75%</option>
-          <option value="10000" selected>100%</option>
+          <option value="10000">100%</option>
         </select>
 
         <button onclick="vote()">Vote</button>
@@ -126,7 +126,6 @@
         const result = await response.text();
         document.getElementById("status").innerText = result;
 
-        // ✅ Show alert if vote was successful
         if (result.startsWith("✅")) {
           alert("Vote has been successfully cast!");
           logVote(link, weight);
@@ -143,7 +142,9 @@
         entry.className = "log-entry";
         const usernameMatch = link.match(/@([^/]+)/);
         const username = usernameMatch ? usernameMatch[1] : "unknown";
-        entry.innerHTML = `${new Date().toLocaleTimeString()} - <span class="highlight">@${username}</span>/${link.split('/').pop()} [${weight / 100}%]`;
+        const permlink = link.split("/").pop();
+        const localTime = new Date().toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila' });
+        entry.innerHTML = `${localTime} - <span class="highlight">@${username}</span>/${permlink} [${weight / 100}%]`;
         logContainer.prepend(entry);
       }
 
@@ -166,7 +167,8 @@
           logs.forEach(log => {
             const entry = document.createElement("div");
             entry.className = "log-entry";
-            entry.innerHTML = `${new Date(log.timestamp).toLocaleString()} - <span class="highlight">@${log.author}</span>/${log.permlink} [${log.weight}%]`;
+            const timePH = new Date(log.timestamp).toLocaleString('en-PH', { timeZone: 'Asia/Manila' });
+            entry.innerHTML = `${timePH} - <span class="highlight">@${log.author}</span>/${log.permlink} [${log.weight}%]`;
             document.getElementById("logContainer").appendChild(entry);
           });
         } catch {
