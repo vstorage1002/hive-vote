@@ -6,12 +6,17 @@ require('dotenv').config();
 
 const app = express();
 app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, 'public'))); // ✅ serve from /public
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Serve index.html at root
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 const HIVE_USER = process.env.HIVE_USER;
 const POSTING_KEY = process.env.POSTING_KEY;
 
-// Vote route
+// Voting endpoint
 app.post('/vote', (req, res) => {
   const { link, weight } = req.body;
   const match = link.match(/@([^\/]+)\/([^\/\s]+)/);
@@ -34,7 +39,7 @@ app.post('/vote', (req, res) => {
   });
 });
 
-// Voting power endpoint
+// Account voting power endpoint
 app.get('/account', (req, res) => {
   hive.api.getAccounts([HIVE_USER], (err, result) => {
     if (err || !result || result.length === 0) {
@@ -43,6 +48,7 @@ app.get('/account', (req, res) => {
 
     const acct = result[0];
     const votingPowerPct = acct.voting_power / 100;
+
     res.json({
       username: HIVE_USER,
       voting_power: votingPowerPct.toFixed(2) + '%'
