@@ -4,40 +4,108 @@
     <title>Hive Vote Tool</title>
     <style>
       body {
-        font-family: Arial;
-        margin: 50px;
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        height: 100vh;
+        display: flex;
+        background: #121212;
+        color: #fff;
       }
-      input,
-      select,
-      button {
+
+      .container {
+        display: flex;
+        width: 100%;
+      }
+
+      .left-panel, .right-panel {
+        flex: 1;
+        padding: 40px;
+        box-sizing: border-box;
+      }
+
+      .left-panel {
+        background: #1e1e1e;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      .left-panel input,
+      .left-panel select,
+      .left-panel button {
         padding: 10px;
-        width: 320px;
+        width: 100%;
         margin-bottom: 10px;
+        font-size: 16px;
+        background: #2a2a2a;
+        border: 1px solid #444;
+        color: #fff;
       }
-      #status, #accountInfo {
-        margin-top: 10px;
+
+      .left-panel h2 {
+        margin-bottom: 20px;
+      }
+
+      .right-panel {
+        background: linear-gradient(135deg, #1a1f2b, #0f121a);
+        border-left: 2px solid #333;
+        overflow-y: auto;
+      }
+
+      .log-title {
+        font-size: 20px;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #444;
+        padding-bottom: 10px;
+      }
+
+      .log-entry {
+        background: rgba(255, 255, 255, 0.05);
+        margin-bottom: 15px;
+        padding: 10px 15px;
+        border-left: 4px solid #00bfff;
+        border-radius: 5px;
+        font-family: monospace;
+      }
+
+      #status {
         font-weight: bold;
+        margin-top: 10px;
+        color: #66ff66;
+      }
+
+      #accountInfo {
+        margin-top: 20px;
+        font-style: italic;
+        color: #999;
       }
     </style>
   </head>
   <body>
-    <h2>Hive Blog Voter</h2>
+    <div class="container">
+      <div class="left-panel">
+        <h2>Hive Blog Voter</h2>
 
-    <input type="text" id="linkInput" placeholder="Paste Hive post link here" />
-    <br />
+        <input type="text" id="linkInput" placeholder="Paste Hive post link here" />
+        <select id="weightSelect">
+          <option value="2500">25%</option>
+          <option value="5000" selected>50%</option>
+          <option value="7500">75%</option>
+          <option value="10000">100%</option>
+        </select>
 
-    <select id="weightSelect">
-      <option value="2500">25%</option>
-      <option value="5000" selected>50%</option>
-      <option value="7500">75%</option>
-      <option value="10000" selected>100%</option>
-    </select>
-    <br />
+        <button onclick="vote()">Vote</button>
 
-    <button onclick="vote()">Vote</button>
+        <p id="status"></p>
+        <p id="accountInfo"></p>
+      </div>
 
-    <p id="status"></p>
-    <p id="accountInfo"></p>
+      <div class="right-panel">
+        <div class="log-title">✅ Upvote Log</div>
+        <div id="logContainer"></div>
+      </div>
+    </div>
 
     <script>
       async function vote() {
@@ -53,21 +121,30 @@
         const result = await response.text();
         document.getElementById("status").innerText = result;
 
+        logVote(link, weight);
         loadAccountInfo();
       }
 
-    async function loadAccountInfo() {
-  try {
-    const res = await fetch('/account');
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    document.getElementById('accountInfo').innerText =
-      `@${data.username} — Voting Power: ${data.voting_power}`;
-  } catch (e) {
-    document.getElementById('accountInfo').innerText =
-      'Could not load account info.';
-  }
-}
+      function logVote(link, weight) {
+        const logContainer = document.getElementById("logContainer");
+        const entry = document.createElement("div");
+        entry.className = "log-entry";
+        entry.innerText = `${new Date().toLocaleTimeString()} - ${link} [${weight / 100}%]`;
+        logContainer.prepend(entry);
+      }
+
+      async function loadAccountInfo() {
+        try {
+          const res = await fetch('/account');
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          document.getElementById('accountInfo').innerText =
+            `@${data.username} — Voting Power: ${data.voting_power}`;
+        } catch (e) {
+          document.getElementById('accountInfo').innerText =
+            'Could not load account info.';
+        }
+      }
 
       window.addEventListener('DOMContentLoaded', loadAccountInfo);
     </script>
