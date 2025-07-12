@@ -14,7 +14,7 @@
         width: 320px;
         margin-bottom: 10px;
       }
-      #status {
+      #status, #accountInfo {
         margin-top: 10px;
         font-weight: bold;
       }
@@ -37,6 +37,7 @@
     <button onclick="vote()">Vote</button>
 
     <p id="status"></p>
+    <p id="accountInfo"></p>
 
     <script>
       async function vote() {
@@ -51,7 +52,24 @@
 
         const result = await response.text();
         document.getElementById("status").innerText = result;
+
+        loadAccountInfo();
       }
+
+      async function loadAccountInfo() {
+        try {
+          const res = await fetch('/account');
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          document.getElementById('accountInfo').innerText =
+            `Voting Power: ${data.voting_power}   |   Voting Mana: ${data.voting_mana}`;
+        } catch (e) {
+          document.getElementById('accountInfo').innerText =
+            'Could not load account info.';
+        }
+      }
+
+      window.addEventListener('DOMContentLoaded', loadAccountInfo);
     </script>
   </body>
 </html>
