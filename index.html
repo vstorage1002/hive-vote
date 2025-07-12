@@ -121,7 +121,14 @@
         const result = await response.text();
         document.getElementById("status").innerText = result;
 
-        logVote(link, weight);
+        // ✅ Show alert if vote was successful
+        if (result.startsWith("✅")) {
+          alert("Vote has been successfully cast!");
+          logVote(link, weight);
+        } else {
+          alert("Failed to vote: " + result);
+        }
+
         loadAccountInfo();
       }
 
