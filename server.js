@@ -6,15 +6,16 @@ require('dotenv').config();
 
 const app = express();
 app.use(bodyParser.json());
-app.use(express.static(__dirname)); // ✅ serve current folder
+app.use(express.static(__dirname)); // serve from current folder
 
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html')); // ✅ serve from root
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 const HIVE_USER = process.env.HIVE_USER;
 const POSTING_KEY = process.env.POSTING_KEY;
 
+// Vote endpoint
 app.post('/vote', (req, res) => {
   const { link, weight } = req.body;
   const match = link.match(/@([^\/]+)\/([^\/\s]+)/);
@@ -37,6 +38,7 @@ app.post('/vote', (req, res) => {
   });
 });
 
+// Account info (voting power)
 app.get('/account', (req, res) => {
   hive.api.getAccounts([HIVE_USER], (err, result) => {
     if (err || !result || result.length === 0) {
@@ -45,6 +47,7 @@ app.get('/account', (req, res) => {
 
     const acct = result[0];
     const votingPowerPct = acct.voting_power / 100;
+
     res.json({
       username: HIVE_USER,
       voting_power: votingPowerPct.toFixed(2) + '%'
@@ -52,5 +55,28 @@ app.get('/account', (req, res) => {
   });
 });
 
+// 3-day vote logs
+app.get('/logs', (req, res) => {
+  const now = Date.now();
+  const threeDaysAgo = now - 3 * 24 * 60 * 60 * 1000;
+
+  hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, history) => {
+    if (err) return res.status(500).json({ error: 'Failed to fetch logs.' });
+
+    const logs = history
+      .map(entry => entry[1])
+      .filter(op => op.op[0] === 'vote' && op.op[1].voter === HIVE_USER)
+      .filter(op => new Date(op.timestamp).getTime() >= threeDaysAgo)
+      .map(op => ({
+        author: op.op[1].author,
+        permlink: op.op[1].permlink,
+        weight: op.op[1].weight / 100,
+        timestamp: op.timestamp,
+      }));
+
+    res.json(logs);
+  });
+});
+
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Server running on port ${port}`));
+app.listen(port, () => console.log(`✅ Server running on port ${port}`));
