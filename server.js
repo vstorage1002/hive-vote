@@ -6,15 +6,14 @@ require('dotenv').config();
 
 const app = express();
 app.use(bodyParser.json());
-app.use(express.static('.'));
+app.use(express.static(path.join(__dirname, 'public'))); // ✅ serve from /public
 
 const HIVE_USER = process.env.HIVE_USER;
 const POSTING_KEY = process.env.POSTING_KEY;
 
-// Voting endpoint
+// Vote route
 app.post('/vote', (req, res) => {
   const { link, weight } = req.body;
-
   const match = link.match(/@([^\/]+)\/([^\/\s]+)/);
   if (!match) return res.send('Invalid Hive link.');
 
@@ -35,7 +34,7 @@ app.post('/vote', (req, res) => {
   });
 });
 
-// Account info endpoint
+// Voting power endpoint
 app.get('/account', (req, res) => {
   hive.api.getAccounts([HIVE_USER], (err, result) => {
     if (err || !result || result.length === 0) {
@@ -44,14 +43,12 @@ app.get('/account', (req, res) => {
 
     const acct = result[0];
     const votingPowerPct = acct.voting_power / 100;
-
     res.json({
       username: HIVE_USER,
       voting_power: votingPowerPct.toFixed(2) + '%'
     });
   });
 });
-
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running on port ${port}`));
