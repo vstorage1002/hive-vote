@@ -11,6 +11,7 @@ app.use(express.static('.'));
 const HIVE_USER = process.env.HIVE_USER;
 const POSTING_KEY = process.env.POSTING_KEY;
 
+// Voting endpoint
 app.post('/vote', (req, res) => {
   const { link, weight } = req.body;
 
@@ -31,6 +32,27 @@ app.post('/vote', (req, res) => {
   hive.broadcast.send({ operations: [voteOp], extensions: [] }, { posting: POSTING_KEY }, (err, result) => {
     if (err) return res.send(`❌ Failed to vote: ${err.message}`);
     res.send(`✅ Voted @${author}/${permlink} with ${(voteWeight / 100).toFixed(0)}% power.`);
+  });
+});
+
+// Account info endpoint
+app.get('/account', (req, res) => {
+  hive.api.getAccounts([HIVE_USER], (err, result) => {
+    if (err || !result || result.length === 0) {
+      return res.status(500).json({ error: 'Failed to fetch account.' });
+    }
+
+    const acct = result[0];
+    const votingPowerPct = acct.voting_power / 100;
+
+    const currentMana = parseFloat(acct.voting_manabar.current_mana);
+    const maxMana = parseFloat(acct.vesting_shares) * 1e6;
+    const votingManaPct = Math.min(100, (currentMana / maxMana) * 100);
+
+    res.json({
+      voting_power: votingPowerPct.toFixed(2) + '%',
+      voting_mana: votingManaPct.toFixed(2) + '%'
+    });
   });
 });
 
