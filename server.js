@@ -72,11 +72,13 @@ app.get('/logs', (req, res) => {
         permlink: op.op[1].permlink,
         weight: op.op[1].weight / 100,
         timestamp: op.timestamp,
-      }));
+      }))
+      .reverse(); // 🔁 reverse to show newest first
 
     res.json(logs);
   });
 });
+
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`✅ Server running on port ${port}`));
