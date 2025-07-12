@@ -56,18 +56,18 @@
         loadAccountInfo();
       }
 
-      async function loadAccountInfo() {
-        try {
-          const res = await fetch('/account');
-          const data = await res.json();
-          if (data.error) throw new Error(data.error);
-          document.getElementById('accountInfo').innerText =
-            `Voting Power: ${data.voting_power}   |   Voting Mana: ${data.voting_mana}`;
-        } catch (e) {
-          document.getElementById('accountInfo').innerText =
-            'Could not load account info.';
-        }
-      }
+    async function loadAccountInfo() {
+  try {
+    const res = await fetch('/account');
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    document.getElementById('accountInfo').innerText =
+      `@${data.username} — Voting Power: ${data.voting_power}`;
+  } catch (e) {
+    document.getElementById('accountInfo').innerText =
+      'Could not load account info.';
+  }
+}
 
       window.addEventListener('DOMContentLoaded', loadAccountInfo);
     </script>
