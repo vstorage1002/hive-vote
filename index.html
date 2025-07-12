@@ -102,7 +102,7 @@
       </div>
 
       <div class="right-panel">
-        <div class="log-title">✅ Upvote Log</div>
+        <div class="log-title">🧾 3-Day Upvote Log</div>
         <div id="logContainer"></div>
       </div>
     </div>
@@ -127,7 +127,6 @@
 
       function logVote(link, weight) {
         const logContainer = document.getElementById("logContainer");
-        if (!logContainer) return;
         const entry = document.createElement("div");
         entry.className = "log-entry";
         entry.innerText = `${new Date().toLocaleTimeString()} - ${link} [${weight / 100}%]`;
@@ -138,16 +137,36 @@
         try {
           const res = await fetch('/account');
           const data = await res.json();
-          if (data.error) throw new Error(data.error);
           document.getElementById('accountInfo').innerText =
             `@${data.username} — Voting Power: ${data.voting_power}`;
-        } catch (e) {
-          document.getElementById('accountInfo').innerText =
-            'Could not load account info.';
+        } catch {
+          document.getElementById('accountInfo').innerText = 'Could not load account info.';
         }
       }
 
-      window.addEventListener('DOMContentLoaded', loadAccountInfo);
+      async function loadPastLogs() {
+        try {
+          const res = await fetch('/logs');
+          const logs = await res.json();
+
+          logs.forEach(log => {
+            const entry = document.createElement("div");
+            entry.className = "log-entry";
+            entry.innerText = `${new Date(log.timestamp).toLocaleString()} - @${log.author}/${log.permlink} [${log.weight}%]`;
+            document.getElementById("logContainer").appendChild(entry);
+          });
+        } catch {
+          const failMsg = document.createElement("div");
+          failMsg.className = "log-entry";
+          failMsg.innerText = "⚠️ Failed to load 3-day logs.";
+          document.getElementById("logContainer").appendChild(failMsg);
+        }
+      }
+
+      window.addEventListener('DOMContentLoaded', () => {
+        loadAccountInfo();
+        loadPastLogs();
+      });
     </script>
   </body>
 </html>
