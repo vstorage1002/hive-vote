@@ -25,3 +25,4 @@ jobs:
           HIVE_USER: ${{ secrets.HIVE_USER }}
           ACTIVE_KEY: ${{ secrets.ACTIVE_KEY }}
         run: node scripts/payout.js
+# Force trigger for schedule
