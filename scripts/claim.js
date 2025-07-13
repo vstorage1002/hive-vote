@@ -66,7 +66,7 @@ async function claimRewards() {
     if (!hasReward) {
       const msg = '📭 No rewards to claim at this time.';
       console.log(msg);
-      Optional: uncomment to send Discord alert even when empty
+      //Optional: uncomment to send Discord alert even when empty
        sendDiscordAlert(msg);
       return;
     }
