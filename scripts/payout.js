@@ -1,10 +1,39 @@
 const hive = require('@hiveio/hive-js');
-hive.api.setOptions({ url: 'https://api.hive.blog' }); // ✅ Force node
-
 require('dotenv').config();
 
 const HIVE_USER = process.env.HIVE_USER;
 const ACTIVE_KEY = process.env.ACTIVE_KEY;
+
+const API_NODES = [
+  'https://api.hive.blog',
+  'https://api.openhive.network',
+  'https://anyx.io',
+  'https://hived.privex.io',
+  'https://rpc.ausbit.dev',
+  'https://api.deathwing.me'
+];
+
+// Try each node until one works
+async function pickWorkingNode() {
+  for (const url of API_NODES) {
+    hive.api.setOptions({ url });
+    console.log(`🌐 Trying Hive API node: ${url}`);
+
+    const test = await new Promise((resolve) => {
+      hive.api.getVestingDelegations(HIVE_USER, '', 1, (err, res) => {
+        if (err || !res) return resolve(null);
+        resolve(res);
+      });
+    });
+
+    if (test && test.length >= 0) {
+      console.log(`✅ Using working Hive node: ${url}`);
+      return;
+    }
+  }
+
+  throw new Error('❌ No working Hive API node found.');
+}
 
 async function getDynamicProps() {
   return new Promise((resolve, reject) => {
@@ -32,16 +61,16 @@ async function getDelegators() {
         }
 
         if (!result || result.length === 0) {
-          return resolve(all); // no more delegators
+          return resolve(all);
         }
 
         all = all.concat(result);
         last = result[result.length - 1].delegator;
 
         if (result.length === 1000) {
-          fetchNextBatch(); // fetch next batch
+          fetchNextBatch();
         } else {
-          resolve(all); // done
+          resolve(all);
         }
       });
     }
@@ -77,6 +106,8 @@ async function thankDelegators() {
   console.log('🚀 Sending thank-you messages to delegators...');
   console.log(`ℹ️ Running payout as @${HIVE_USER}`);
 
+  await pickWorkingNode();
+
   const props = await getDynamicProps();
   const totalVestingShares = parseFloat(props.total_vesting_shares);
   const totalVestingFundHive = parseFloat(props.total_vesting_fund_steem);
@@ -90,11 +121,6 @@ async function thankDelegators() {
     const account = d.delegator;
     const hp = vestsToHP(d.vesting_shares, totalVestingFundHive, totalVestingShares);
     console.log(`🔍 Delegator @${account} has ~${hp.toFixed(3)} HP`);
-
-    // Optional: skip small delegations
-    // if (hp < 1) continue;
-
-    console.log(`➡️ Sending 0.001 HIVE to @${account}`);
     await sendThankYou(account);
   }
 
