@@ -2,7 +2,7 @@ name: Auto Claim Hive Rewards
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # every 15 minutes PH time (UTC-based)
+    - cron: '*/1 * * * *' # every 1 minute PH time (UTC-based)
   workflow_dispatch: # optional manual run
 
 jobs:
