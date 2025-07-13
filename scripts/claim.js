@@ -9,12 +9,9 @@ const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 hive.api.setOptions({ url: 'https://api.hive.blog' });
 
 function sendDiscordAlert(message) {
-  if (!DISCORD_WEBHOOK_URL) {
-    console.warn('⚠️ No DISCORD_WEBHOOK_URL provided.');
-    return;
-  }
+  if (!DISCORD_WEBHOOK_URL) return;
 
-  const data = JSON.stringify({ content: String(message) }); // Ensure message is a string
+  const data = JSON.stringify({ content: message });
   const url = new URL(DISCORD_WEBHOOK_URL);
 
   const options = {
@@ -23,15 +20,12 @@ function sendDiscordAlert(message) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(data),
+      'Content-Length': data.length,
     },
   };
 
   const req = https.request(options, (res) => {
-    console.log(`📡 Discord webhook responded with status: ${res.statusCode}`);
-    res.on('data', (chunk) => {
-      console.log(`🔧 Response body: ${chunk.toString()}`);
-    });
+    res.on('data', () => {});
   });
 
   req.on('error', (error) => {
@@ -66,8 +60,8 @@ async function claimRewards() {
     if (!hasReward) {
       const msg = '📭 No rewards to claim at this time.';
       console.log(msg);
-      // Optional: send Discord alert even when no rewards
-      sendDiscordAlert(msg);
+      // ✅ Uncomment below to get Discord alert even if no rewards:
+      // sendDiscordAlert(msg);
       return;
     }
 
@@ -92,7 +86,8 @@ async function claimRewards() {
   });
 }
 
-// Optional: test webhook connectivity when script starts
-sendDiscordAlert('🧪 Test webhook connection: Claim script started');
-
+// 🏁 Run the claim process
 claimRewards();
+
+// ✅ TEST LINE — this sends a test message to Discord:
+sendDiscordAlert('✅ Discord webhook is working! Test message from claim.js');
