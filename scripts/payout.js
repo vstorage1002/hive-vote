@@ -17,25 +17,6 @@ function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
   return (parseFloat(vests) * parseFloat(totalVestingFundHive)) / parseFloat(totalVestingShares);
 }
 
-async function getCurationRewardsToday() {
-  return new Promise((resolve, reject) => {
-    hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, history) => {
-      if (err) return reject(err);
-
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const totalVests = history
-        .map(op => op[1])
-        .filter(op => op.op[0] === 'curation_reward')
-        .filter(op => new Date(op.timestamp).getTime() >= today.getTime())
-        .reduce((sum, op) => sum + parseFloat(op.op[1].reward), 0);
-
-      resolve(totalVests);
-    });
-  });
-}
-
 async function getDelegators() {
   return new Promise((resolve, reject) => {
     hive.api.getVestingDelegations(HIVE_USER, '', 1000, (err, result) => {
@@ -45,7 +26,10 @@ async function getDelegators() {
   });
 }
 
-async function sendPayout(to, amount, memo = 'Daily curation payout') {
+async function sendThankYou(to) {
+  const amount = 0.001;
+  const memo = `🙏 Thank you @${to} for delegating to @${HIVE_USER}! Here's a small token of appreciation.`;
+
   return new Promise((resolve, reject) => {
     hive.broadcast.transfer(
       ACTIVE_KEY,
@@ -55,59 +39,38 @@ async function sendPayout(to, amount, memo = 'Daily curation payout') {
       memo,
       (err, result) => {
         if (err) {
-          console.error(`❌ Failed to send ${amount.toFixed(3)} HIVE to ${to}:`, err.message);
+          console.error(`❌ Failed to send to ${to}:`, err.message);
           return reject(err);
         }
-        console.log(`✅ Sent ${amount.toFixed(3)} HIVE to ${to}`);
+        console.log(`✅ Sent 0.001 HIVE to ${to}`);
         resolve(result);
       }
     );
   });
 }
 
-async function distributeRewards() {
-  console.log('🚀 Starting curation reward distribution...');
+async function thankDelegators() {
+  console.log('🚀 Sending thank-you messages to delegators...');
 
-  const [props, totalVests, delegators] = await Promise.all([
-    getDynamicProps(),
-    getCurationRewardsToday(),
-    getDelegators()
-  ]);
-
+  const props = await getDynamicProps();
   const totalVestingShares = parseFloat(props.total_vesting_shares);
   const totalVestingFundHive = parseFloat(props.total_vesting_fund_steem);
 
-  const totalHiveRewards = vestsToHP(totalVests, totalVestingFundHive, totalVestingShares);
-  const reward95 = totalHiveRewards * 0.95;
+  const delegators = await getDelegators();
 
-  if (totalHiveRewards === 0) {
-    console.log('⚠️ No curation rewards today.');
-    return;
-  }
+  for (const d of delegators) {
+    const account = d.delegatee;
+    const hp = vestsToHP(d.vesting_shares, totalVestingFundHive, totalVestingShares);
 
-  console.log(`📊 Total earned: ${totalHiveRewards.toFixed(3)} HIVE`);
-  console.log(`📤 Distributing 95% = ${reward95.toFixed(3)} HIVE`);
-
-  const delegatorHPs = delegators.map(d => ({
-    account: d.delegatee,
-    hp: vestsToHP(d.vesting_shares, totalVestingFundHive, totalVestingShares)
-  }));
-
-  const totalDelegatedHP = delegatorHPs.reduce((sum, d) => sum + d.hp, 0);
-
-  for (const delegator of delegatorHPs) {
-    const share = delegator.hp / totalDelegatedHP;
-    const payout = reward95 * share;
-
-    if (payout < 0.001) {
-      console.log(`⏩ Skipped ${delegator.account} (below threshold)`);
+    if (hp < 1) {
+      console.log(`⏩ Skipping @${account} (less than 1 HP delegated)`);
       continue;
     }
 
-    await sendPayout(delegator.account, payout);
+    await sendThankYou(account);
   }
 
-  console.log('🏁 Distribution complete. ✅');
+  console.log('🏁 All thank-you payments sent. ✅');
 }
 
-distributeRewards().catch(console.error);
+thankDelegators().catch(console.error);
