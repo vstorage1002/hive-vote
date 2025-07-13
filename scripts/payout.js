@@ -58,18 +58,18 @@ async function thankDelegators() {
   const totalVestingFundHive = parseFloat(props.total_vesting_fund_steem);
 
   const delegators = await getDelegators();
+  console.log(`🧾 Raw delegator list:`);
+  console.dir(delegators, { depth: null });
+
   console.log(`ℹ️ Found ${delegators.length} delegators.`);
 
   for (const d of delegators) {
-    const account = d.delegator; // ✅ FIXED
+    const account = d.delegator;
     const hp = vestsToHP(d.vesting_shares, totalVestingFundHive, totalVestingShares);
     console.log(`🔍 Delegator @${account} has ~${hp.toFixed(3)} HP`);
 
-    // 🔧 Skip low HP delegations only if needed (disabled for now)
-    // if (hp < 1) {
-    //   console.log(`⏩ Skipping @${account} (less than 1 HP delegated)`);
-    //   continue;
-    // }
+    // Optional: skip small HP
+    // if (hp < 1) continue;
 
     console.log(`➡️ Sending 0.001 HIVE to @${account}`);
     await sendThankYou(account);
