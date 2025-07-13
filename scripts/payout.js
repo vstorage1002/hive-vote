@@ -8,9 +8,8 @@ const API_NODES = [
   'https://api.hive.blog',
   'https://api.openhive.network',
   'https://anyx.io',
-  'https://hived.privex.io',
   'https://rpc.ausbit.dev',
-  'https://api.deathwing.me'
+  'https://hived.privex.io',
 ];
 
 async function pickWorkingNode() {
@@ -19,8 +18,7 @@ async function pickWorkingNode() {
     console.log(`🌐 Trying Hive API node: ${url}`);
     const test = await new Promise((resolve) => {
       hive.api.getAccounts([HIVE_USER], (err, res) => {
-        if (err || !res) return resolve(null);
-        resolve(res);
+        resolve(err || !res ? null : res);
       });
     });
     if (test) {
@@ -31,31 +29,26 @@ async function pickWorkingNode() {
   throw new Error('❌ No working Hive API found.');
 }
 
-async function getDynamicProps() {
+async function getDelegatorsFromHistory() {
   return new Promise((resolve, reject) => {
-    hive.api.getDynamicGlobalProperties((err, res) => {
-      if (err) return reject(err);
-      resolve(res);
-    });
-  });
-}
-
-function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
-  return (parseFloat(vests) * parseFloat(totalVestingFundHive)) / parseFloat(totalVestingShares);
-}
-
-async function getDelegatorsToAccount() {
-  return new Promise((resolve, reject) => {
-    hive.api.call('rc_api.list_vesting_delegations', {
-      start: [null, HIVE_USER],
-      limit: 1000,
-      order: 'by_delegatee'
-    }, (err, result) => {
+    hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, history) => {
       if (err) {
-        console.error('❌ Failed to fetch incoming delegations:', err.message);
         return reject(err);
       }
-      resolve(result.delegations);
+
+      const delegators = new Map();
+
+      for (let i = history.length - 1; i >= 0; i--) {
+        const op = history[i][1];
+        if (op.op[0] === 'delegate_vesting_shares') {
+          const { delegator, delegatee, vesting_shares } = op.op[1];
+          if (delegatee === HIVE_USER && vesting_shares !== '0.000000 VESTS') {
+            delegators.set(delegator, vesting_shares);
+          }
+        }
+      }
+
+      resolve(Array.from(delegators.entries()));
     });
   });
 }
@@ -88,24 +81,18 @@ async function thankDelegators() {
 
   await pickWorkingNode();
 
-  const props = await getDynamicProps();
-  const totalVestingShares = parseFloat(props.total_vesting_shares);
-  const totalVestingFundHive = parseFloat(props.total_vesting_fund_steem);
+  const delegators = await getDelegatorsFromHistory();
 
-  const delegations = await getDelegatorsToAccount();
-
-  if (!delegations || delegations.length === 0) {
-    console.log('❌ No incoming delegators found.');
+  if (delegators.length === 0) {
+    console.log('❌ No delegators found from history.');
     return;
   }
 
-  console.log(`✅ Found ${delegations.length} incoming delegators.`);
+  console.log(`✅ Found ${delegators.length} recent delegators.`);
 
-  for (const d of delegations) {
-    const from = d.delegator;
-    const hp = vestsToHP(d.vesting_shares.amount, totalVestingFundHive, totalVestingShares);
-    console.log(`🔍 Delegator @${from} has delegated ~${hp.toFixed(3)} HP`);
-    await sendThankYou(from);
+  for (const [delegator, shares] of delegators) {
+    console.log(`🔍 @${delegator} delegated ${shares}`);
+    await sendThankYou(delegator);
   }
 
   console.log('🏁 All thank-you payments sent. ✅');
