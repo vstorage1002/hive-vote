@@ -1,15 +1,49 @@
 const hive = require('@hiveio/hive-js');
+const https = require('https');
 require('dotenv').config();
 
 const HIVE_USER = process.env.HIVE_USER;
 const ACTIVE_KEY = process.env.ACTIVE_KEY;
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
 hive.api.setOptions({ url: 'https://api.hive.blog' });
 
+function sendDiscordAlert(message) {
+  if (!DISCORD_WEBHOOK_URL) return;
+
+  const data = JSON.stringify({ content: message });
+  const url = new URL(DISCORD_WEBHOOK_URL);
+
+  const options = {
+    hostname: url.hostname,
+    path: url.pathname + url.search,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': data.length,
+    },
+  };
+
+  const req = https.request(options, (res) => {
+    res.on('data', () => {});
+  });
+
+  req.on('error', (error) => {
+    console.error('❌ Failed to send Discord alert:', error);
+  });
+
+  req.write(data);
+  req.end();
+}
+
 async function claimRewards() {
+  console.log(`🚀 Checking rewards for @${HIVE_USER}...`);
+
   hive.api.getAccounts([HIVE_USER], (err, res) => {
     if (err || !res || res.length === 0) {
-      console.error('❌ Failed to load account data');
+      const failMsg = '❌ Failed to load account data.';
+      console.error(failMsg);
+      sendDiscordAlert(failMsg);
       return;
     }
 
@@ -24,7 +58,9 @@ async function claimRewards() {
       vestingReward !== '0.000000 VESTS';
 
     if (!hasReward) {
-      console.log('📭 No rewards to claim right now.');
+      const msg = '📭 No rewards to claim at this time.';
+      console.log(msg);
+      // Optional: sendDiscordAlert(msg);
       return;
     }
 
@@ -36,9 +72,13 @@ async function claimRewards() {
       vestingReward,
       (err, result) => {
         if (err) {
-          console.error('❌ Failed to claim rewards:', err.message);
+          const errorMsg = `❌ Failed to claim rewards: ${err.message}`;
+          console.error(errorMsg);
+          sendDiscordAlert(errorMsg);
         } else {
-          console.log(`✅ Claimed rewards: ${hiveReward}, ${hbdReward}, ${vestingReward}`);
+          const successMsg = `✅ @${HIVE_USER} claimed: ${hiveReward}, ${hbdReward}, ${vestingReward}`;
+          console.log(successMsg);
+          sendDiscordAlert(successMsg);
         }
       }
     );
