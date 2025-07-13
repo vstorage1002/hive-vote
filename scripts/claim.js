@@ -93,6 +93,6 @@ async function claimRewards() {
 }
 
 // Optional: test webhook connectivity when script starts
-sendDiscordAlert('🧪 Test webhook connection: Claim script started');
+// sendDiscordAlert('🧪 Test webhook connection: Claim script started');
 
 claimRewards();
