@@ -1,4 +1,6 @@
 const hive = require('@hiveio/hive-js');
+hive.api.setOptions({ url: 'https://api.hive.blog' }); // ✅ Force node
+
 require('dotenv').config();
 
 const HIVE_USER = process.env.HIVE_USER;
