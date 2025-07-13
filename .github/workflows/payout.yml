@@ -1,0 +1,27 @@
+name: Daily Delegator Payout
+
+on:
+  schedule:
+    - cron: '0 1 * * *' # 9 AM PH time daily
+  workflow_dispatch:
+
+jobs:
+  payout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run payout script
+        env:
+          HIVE_USER: ${{ secrets.HIVE_USER }}
+          ACTIVE_KEY: ${{ secrets.ACTIVE_KEY }}
+        run: node scripts/payout.js
