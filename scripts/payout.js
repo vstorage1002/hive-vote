@@ -61,11 +61,11 @@ async function thankDelegators() {
   console.log(`ℹ️ Found ${delegators.length} delegators.`);
 
   for (const d of delegators) {
-    const account = d.delegator;
+    const account = d.delegator; // ✅ FIXED
     const hp = vestsToHP(d.vesting_shares, totalVestingFundHive, totalVestingShares);
     console.log(`🔍 Delegator @${account} has ~${hp.toFixed(3)} HP`);
 
-    // 🔧 Disabled HP check for testing
+    // 🔧 Skip low HP delegations only if needed (disabled for now)
     // if (hp < 1) {
     //   console.log(`⏩ Skipping @${account} (less than 1 HP delegated)`);
     //   continue;
