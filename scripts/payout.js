@@ -42,7 +42,7 @@ async function sendThankYou(to) {
           console.error(`❌ Failed to send to ${to}:`, err.message);
           return reject(err);
         }
-        console.log(`✅ Sent 0.001 HIVE to ${to}`);
+        console.log(`✅ Sent 0.001 HIVE to @${to}`);
         resolve(result);
       }
     );
@@ -51,22 +51,27 @@ async function sendThankYou(to) {
 
 async function thankDelegators() {
   console.log('🚀 Sending thank-you messages to delegators...');
+  console.log(`ℹ️ Running payout as @${HIVE_USER}`);
 
   const props = await getDynamicProps();
   const totalVestingShares = parseFloat(props.total_vesting_shares);
   const totalVestingFundHive = parseFloat(props.total_vesting_fund_steem);
 
   const delegators = await getDelegators();
+  console.log(`ℹ️ Found ${delegators.length} delegators.`);
 
   for (const d of delegators) {
     const account = d.delegatee;
     const hp = vestsToHP(d.vesting_shares, totalVestingFundHive, totalVestingShares);
+    console.log(`🔍 Delegator @${account} has ~${hp.toFixed(3)} HP`);
 
-    if (hp < 1) {
-      console.log(`⏩ Skipping @${account} (less than 1 HP delegated)`);
-      continue;
-    }
+    // 🔧 Disabled HP check for testing
+    // if (hp < 1) {
+    //   console.log(`⏩ Skipping @${account} (less than 1 HP delegated)`);
+    //   continue;
+    // }
 
+    console.log(`➡️ Sending 0.001 HIVE to @${account}`);
     await sendThankYou(account);
   }
 
