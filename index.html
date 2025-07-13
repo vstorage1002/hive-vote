@@ -187,10 +187,11 @@
         }
       }
 
-      window.addEventListener('DOMContentLoaded', () => {
-        loadAccountInfo();
-        loadPastLogs();
-      });
+     window.addEventListener('DOMContentLoaded', () => {
+  loadAccountInfo();
+  loadPastLogs();
+  setInterval(loadAccountInfo, 5000); // Refresh voting power every 5 seconds
+});
     </script>
   </body>
 </html>
