@@ -19,10 +19,32 @@ function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
 
 async function getDelegators() {
   return new Promise((resolve, reject) => {
-    hive.api.getVestingDelegations(HIVE_USER, '', 1000, (err, result) => {
-      if (err) return reject(err);
-      resolve(result);
-    });
+    let all = [];
+    let last = '';
+
+    function fetchNextBatch() {
+      hive.api.getVestingDelegations(HIVE_USER, last, 1000, (err, result) => {
+        if (err) {
+          console.error('❌ Error fetching delegators:', err.message);
+          return reject(err);
+        }
+
+        if (!result || result.length === 0) {
+          return resolve(all); // no more delegators
+        }
+
+        all = all.concat(result);
+        last = result[result.length - 1].delegator;
+
+        if (result.length === 1000) {
+          fetchNextBatch(); // fetch next batch
+        } else {
+          resolve(all); // done
+        }
+      });
+    }
+
+    fetchNextBatch();
   });
 }
 
@@ -58,17 +80,16 @@ async function thankDelegators() {
   const totalVestingFundHive = parseFloat(props.total_vesting_fund_steem);
 
   const delegators = await getDelegators();
-  console.log(`🧾 Raw delegator list:`);
-  console.dir(delegators, { depth: null });
-
   console.log(`ℹ️ Found ${delegators.length} delegators.`);
+  console.log('🧾 Raw delegator list:');
+  console.dir(delegators, { depth: null });
 
   for (const d of delegators) {
     const account = d.delegator;
     const hp = vestsToHP(d.vesting_shares, totalVestingFundHive, totalVestingShares);
     console.log(`🔍 Delegator @${account} has ~${hp.toFixed(3)} HP`);
 
-    // Optional: skip small HP
+    // Optional: skip small delegations
     // if (hp < 1) continue;
 
     console.log(`➡️ Sending 0.001 HIVE to @${account}`);
