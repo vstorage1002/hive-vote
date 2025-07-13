@@ -14,7 +14,7 @@ function sendDiscordAlert(message) {
     return;
   }
 
-  const data = JSON.stringify({ content: message });
+  const data = JSON.stringify({ content: String(message) }); // Ensure message is a string
   const url = new URL(DISCORD_WEBHOOK_URL);
 
   const options = {
@@ -23,7 +23,7 @@ function sendDiscordAlert(message) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Content-Length': data.length,
+      'Content-Length': Buffer.byteLength(data),
     },
   };
 
@@ -66,8 +66,8 @@ async function claimRewards() {
     if (!hasReward) {
       const msg = '📭 No rewards to claim at this time.';
       console.log(msg);
-      //Optional: uncomment to send Discord alert even when empty
-       sendDiscordAlert(msg);
+      // Optional: send Discord alert even when no rewards
+      sendDiscordAlert(msg);
       return;
     }
 
