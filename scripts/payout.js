@@ -61,7 +61,7 @@ async function thankDelegators() {
   console.log(`ℹ️ Found ${delegators.length} delegators.`);
 
   for (const d of delegators) {
-    const account = d.delegatee;
+    const account = d.delegator;
     const hp = vestsToHP(d.vesting_shares, totalVestingFundHive, totalVestingShares);
     console.log(`🔍 Delegator @${account} has ~${hp.toFixed(3)} HP`);
 
