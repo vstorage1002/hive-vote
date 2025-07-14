@@ -27,4 +27,4 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: node scripts/claim.js
 
-        # Triggering scheduled run
+# 🟢 Triggering scheduled run - updated to reactivate GitHub Actions scheduler
