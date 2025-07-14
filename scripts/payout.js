@@ -75,7 +75,7 @@ async function getCurationRewards() {
         }
       }
 
-      resolve(totalHive); // This is in VESTS, will be converted to HIVE later
+      resolve(totalHive); // in VESTS
     });
   });
 }
@@ -93,8 +93,15 @@ function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
   return (parseFloat(vests) * parseFloat(totalVestingFundHive)) / parseFloat(totalVestingShares);
 }
 
-async function sendPayout(to, amount, percent) {
-  const memo = `💸 ${percent}% of curation reward — thank you for delegating to @${HIVE_USER}!`;
+async function sendPayout(to, amount) {
+  const phDate = new Date().toLocaleDateString('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
+  const memo = `Thank you for your delegation to @${HIVE_USER} — ${phDate}`;
 
   return new Promise((resolve, reject) => {
     hive.broadcast.transfer(
@@ -136,7 +143,7 @@ async function distributeRewards() {
 
   console.log(`📊 Total curation rewards in last 24h: ~${totalCurationHive.toFixed(3)} HIVE`);
 
-  if (totalCurationHive < 0.001 || delegators.size === 0) {
+  if (totalCurationHive < 0.000001 || delegators.size === 0) {
     console.log('⚠️ Nothing to distribute (either 0 rewards or no delegators).');
     return;
   }
@@ -150,15 +157,15 @@ async function distributeRewards() {
   for (const [delegator, vests] of delegators.entries()) {
     const share = vests / totalDelegated;
     const payout = distributable * share;
-    const percent = (share * 100).toFixed(2);
-    if (payout >= 0.001) {
-      await sendPayout(delegator, payout, percent);
+
+    if (payout >= 0.000001) {
+      await sendPayout(delegator, payout);
     } else {
-      console.log(`⚠️ Skipping @${delegator} — reward too small (${payout.toFixed(3)} HIVE)`);
+      console.log(`⚠️ Skipping @${delegator} — reward too small (${payout.toFixed(6)} HIVE)`);
     }
   }
 
-  console.log(`🏁 Done. 95% distributed, 5% retained (~${retained.toFixed(3)} HIVE).`);
+  console.log(`🏁 Done. 95% distributed, 5% retained (~${retained.toFixed(6)} HIVE).`);
 }
 
 distributeRewards().catch(console.error);
