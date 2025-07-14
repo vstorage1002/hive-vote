@@ -1,19 +1,48 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Hive Payout Monitor</title>
+  <meta charset="UTF-8">
+  <title>Hive Payout Dashboard</title>
   <style>
-    body { font-family: sans-serif; margin: 2em; }
-    table, th, td { border: 1px solid #ccc; border-collapse: collapse; padding: 8px; }
-    .warn { color: red; }
+    body {
+      font-family: sans-serif;
+      margin: 2em;
+      background: #f9f9f9;
+    }
+    h1 {
+      color: #444;
+    }
+    button {
+      padding: 10px 20px;
+      margin-bottom: 1em;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    table, th, td {
+      border: 1px solid #ccc;
+    }
+    th, td {
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background: #eee;
+    }
   </style>
 </head>
 <body>
   <h1>🧾 Hive Payout Dashboard</h1>
-  <p id="last-payout">⏳ Loading last payout info...</p>
+  <p id="last-payout">⏳ Loading last payout status...</p>
+  <button onclick="triggerPayout()">🔁 Run Manual Payout</button>
 
-  <h2>📦 Unpaid Rewards</h2>
+  <h2>📦 Stored (Unpaid) Rewards</h2>
   <table>
     <thead><tr><th>Delegator</th><th>Amount</th></tr></thead>
     <tbody id="reward-table"></tbody>
