@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // === Paths ===
 const UI_PATH = path.join(__dirname, '../ui');
@@ -32,15 +32,29 @@ if (!fs.existsSync(PAYOUT_LOG_PATH)) {
 app.use(express.static(UI_PATH));
 app.use('/logs', express.static(LOGS_PATH));
 
+// ✅ Force index.html on root
+app.get('/', (req, res) => {
+  res.sendFile(path.join(UI_PATH, 'index.html'));
+});
+
 // === Routes ===
 app.get('/last-payout', (req, res) => {
-  const lines = fs.readFileSync(PAYOUT_LOG_PATH, 'utf-8').trim().split('\n');
-  const last = lines.length ? lines[lines.length - 1].split(' - ')[0] : null;
-  res.json({ last });
+  try {
+    const lines = fs.readFileSync(PAYOUT_LOG_PATH, 'utf-8').trim().split('\n');
+    const last = lines.length ? lines[lines.length - 1].split(' - ')[0] : null;
+    res.json({ last });
+  } catch (e) {
+    res.json({ last: null });
+  }
 });
 
 app.get('/reward-cache', (req, res) => {
-  res.json(JSON.parse(fs.readFileSync(REWARD_CACHE_PATH)));
+  try {
+    const data = fs.readFileSync(REWARD_CACHE_PATH);
+    res.json(JSON.parse(data));
+  } catch (e) {
+    res.json({});
+  }
 });
 
 app.post('/run-payout', (req, res) => {
