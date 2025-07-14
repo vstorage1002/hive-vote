@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hive Payout Monitor</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; }
+    table, th, td { border: 1px solid #ccc; border-collapse: collapse; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>🧾 Hive Payout Dashboard</h1>
+  <p id="last-payout">⏳ Checking last payout...</p>
+  <button onclick="triggerPayout()">🔁 Run Manual Payout</button>
+
+  <h2>📦 Unpaid Rewards</h2>
+  <table>
+    <thead><tr><th>Delegator</th><th>Amount</th></tr></thead>
+    <tbody id="reward-table"></tbody>
+  </table>
+
+  <script src="app.js"></script>
+</body>
+</html>
