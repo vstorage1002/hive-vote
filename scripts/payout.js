@@ -29,24 +29,41 @@ async function pickWorkingNode() {
   throw new Error('❌ No working Hive API found.');
 }
 
-async function getDelegatorsFromHistory() {
+async function getDelegatorsOlderThan7Days() {
   return new Promise((resolve, reject) => {
-    hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, history) => {
+    hive.api.getAccountHistory(HIVE_USER, -1, 10000, (err, history) => {
       if (err) return reject(err);
 
-      const delegators = new Map();
+      const delegatorMap = new Map();
+      const cutoffTime = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
-      for (let i = history.length - 1; i >= 0; i--) {
-        const op = history[i][1];
+      for (const [, op] of history) {
         if (op.op[0] === 'delegate_vesting_shares') {
           const { delegator, delegatee, vesting_shares } = op.op[1];
-          if (delegatee === HIVE_USER && vesting_shares !== '0.000000 VESTS') {
-            delegators.set(delegator, parseFloat(vesting_shares));
+          const timestamp = new Date(op.timestamp + 'Z').getTime();
+
+          if (
+            delegatee === HIVE_USER &&
+            vesting_shares !== '0.000000 VESTS' &&
+            timestamp <= cutoffTime
+          ) {
+            // Only keep the latest qualified (older than 7 days) delegation per user
+            if (!delegatorMap.has(delegator) || delegatorMap.get(delegator).timestamp < timestamp) {
+              delegatorMap.set(delegator, {
+                vests: parseFloat(vesting_shares),
+                timestamp,
+              });
+            }
           }
         }
       }
 
-      resolve(delegators);
+      const result = new Map();
+      for (const [user, data] of delegatorMap.entries()) {
+        result.set(user, data.vests);
+      }
+
+      resolve(result);
     });
   });
 }
@@ -57,7 +74,7 @@ async function getCurationRewards() {
 
   const today8AM = new Date(now.toLocaleString('en-US', { timeZone: phTz }));
   today8AM.setHours(8, 0, 0, 0);
-  const fromTime = today8AM.getTime() - 24 * 60 * 60 * 1000; // previous day 8AM
+  const fromTime = today8AM.getTime() - 24 * 60 * 60 * 1000;
 
   return new Promise((resolve, reject) => {
     hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, history) => {
@@ -75,7 +92,7 @@ async function getCurationRewards() {
         }
       }
 
-      resolve(totalHive); // in VESTS
+      resolve(totalHive);
     });
   });
 }
@@ -101,7 +118,7 @@ async function sendPayout(to, amount) {
     day: 'numeric'
   });
 
-  const memo = `Thank you for your delegation to @${HIVE_USER} — ${phDate}`;
+  const memo = `💖 Thank you for your delegation to @${HIVE_USER} — ${phDate}`;
 
   return new Promise((resolve, reject) => {
     hive.broadcast.transfer(
@@ -128,7 +145,7 @@ async function distributeRewards() {
 
   const [props, delegators, totalVests] = await Promise.all([
     getDynamicProps(),
-    getDelegatorsFromHistory(),
+    getDelegatorsOlderThan7Days(),
     getCurationRewards()
   ]);
 
@@ -141,7 +158,7 @@ async function distributeRewards() {
     totalVestingShares
   );
 
-  console.log(`📊 Total curation rewards in last 24h: ~${totalCurationHive.toFixed(3)} HIVE`);
+  console.log(`📊 Total curation rewards in last 24h: ~${totalCurationHive.toFixed(6)} HIVE`);
 
   if (totalCurationHive < 0.000001 || delegators.size === 0) {
     console.log('⚠️ Nothing to distribute (either 0 rewards or no delegators).');
