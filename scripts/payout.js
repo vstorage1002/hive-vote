@@ -7,8 +7,10 @@ const HIVE_USER = process.env.HIVE_USER;
 const ACTIVE_KEY = process.env.ACTIVE_KEY;
 const DELEGATION_WEBHOOK_URL = process.env.DELEGATION_WEBHOOK_URL;
 
-const REWARD_CACHE_FILE = 'reward_cache.json';
+const REWARD_CACHE_FILE = 'ui/reward_cache.json'; // 📁 now inside /ui
+const PAYOUT_LOG_FILE = 'ui/payout.log';          // 📁 now inside /ui
 const DELEGATION_SNAPSHOT_FILE = 'delegation_snapshot.json';
+
 const MIN_PAYOUT = 0.001;
 
 const API_NODES = [
@@ -19,12 +21,9 @@ const API_NODES = [
   'https://hived.privex.io',
 ];
 
-// 🔔 Send webhook notification to a given URL
 function sendWebhookMessage(content, url) {
   if (!url) return;
-
   const data = JSON.stringify({ content });
-
   const parsed = new URL(url);
   const options = {
     hostname: parsed.hostname,
@@ -32,8 +31,8 @@ function sendWebhookMessage(content, url) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Content-Length': data.length
-    }
+      'Content-Length': data.length,
+    },
   };
 
   const req = https.request(options, (res) => {
@@ -108,7 +107,7 @@ async function fetchFullDelegationHistory() {
     combined.set(d.delegator, combined.get(d.delegator) + d.vests);
   }
 
-  // Compare with previous snapshot
+  // 🔔 Webhook delegation changes
   const previous = loadDelegationSnapshot();
   const current = Object.fromEntries(combined);
 
@@ -220,6 +219,11 @@ function saveDelegationSnapshot(snapshot) {
   fs.writeFileSync(DELEGATION_SNAPSHOT_FILE, JSON.stringify(snapshot, null, 2));
 }
 
+function appendPayoutLog() {
+  const timestamp = new Date().toISOString();
+  fs.appendFileSync(PAYOUT_LOG_FILE, `${timestamp} - Payout completed\n`);
+}
+
 async function distributeRewards() {
   console.log(`🚀 Calculating rewards for @${HIVE_USER}...`);
   await pickWorkingNode();
@@ -268,6 +272,7 @@ async function distributeRewards() {
   }
 
   saveRewardCache(rewardCache);
+  appendPayoutLog();
 
   console.log(`🏁 Done. 95% distributed, 5% retained (~${retained.toFixed(6)} HIVE).`);
 }
