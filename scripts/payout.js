@@ -1,10 +1,14 @@
 const hive = require('@hiveio/hive-js');
 const fs = require('fs');
+const https = require('https');
 require('dotenv').config();
 
 const HIVE_USER = process.env.HIVE_USER;
 const ACTIVE_KEY = process.env.ACTIVE_KEY;
+const DELEGATION_WEBHOOK_URL = process.env.DELEGATION_WEBHOOK_URL;
+
 const REWARD_CACHE_FILE = 'reward_cache.json';
+const DELEGATION_SNAPSHOT_FILE = 'delegation_snapshot.json';
 const MIN_PAYOUT = 0.001;
 
 const API_NODES = [
@@ -14,6 +18,37 @@ const API_NODES = [
   'https://rpc.ausbit.dev',
   'https://hived.privex.io',
 ];
+
+// 🔔 Send webhook notification to a given URL
+function sendWebhookMessage(content, url) {
+  if (!url) return;
+
+  const data = JSON.stringify({ content });
+
+  const parsed = new URL(url);
+  const options = {
+    hostname: parsed.hostname,
+    path: parsed.pathname + parsed.search,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': data.length
+    }
+  };
+
+  const req = https.request(options, (res) => {
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      console.warn(`⚠️ Webhook failed with status ${res.statusCode}`);
+    }
+  });
+
+  req.on('error', (error) => {
+    console.error('Webhook error:', error);
+  });
+
+  req.write(data);
+  req.end();
+}
 
 async function pickWorkingNode() {
   for (const url of API_NODES) {
@@ -35,7 +70,6 @@ async function pickWorkingNode() {
 async function fetchFullDelegationHistory() {
   let start = -1;
   const delegations = [];
-  let fetched = 0;
   const limit = 1000;
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
@@ -64,7 +98,6 @@ async function fetchFullDelegationHistory() {
       }
     }
 
-    fetched += history.length;
     start = history[0][0] - 1;
     if (history.length < limit) break;
   }
@@ -75,6 +108,32 @@ async function fetchFullDelegationHistory() {
     combined.set(d.delegator, combined.get(d.delegator) + d.vests);
   }
 
+  // Compare with previous snapshot
+  const previous = loadDelegationSnapshot();
+  const current = Object.fromEntries(combined);
+
+  for (const [user, newVests] of Object.entries(current)) {
+    const oldVests = previous[user] || 0;
+    if (newVests !== oldVests) {
+      const diff = newVests - oldVests;
+      const type = diff > 0 ? 'delegated' : 'undelegated';
+      sendWebhookMessage(
+        `🔔 @${user} has **${type}** ${Math.abs(diff).toFixed(6)} VESTS to @${HIVE_USER}`,
+        DELEGATION_WEBHOOK_URL
+      );
+    }
+  }
+
+  for (const user of Object.keys(previous)) {
+    if (!current[user]) {
+      sendWebhookMessage(
+        `🔔 @${user} has **undelegated all** from @${HIVE_USER}`,
+        DELEGATION_WEBHOOK_URL
+      );
+    }
+  }
+
+  saveDelegationSnapshot(current);
   return combined;
 }
 
@@ -150,6 +209,15 @@ function loadRewardCache() {
 
 function saveRewardCache(cache) {
   fs.writeFileSync(REWARD_CACHE_FILE, JSON.stringify(cache, null, 2));
+}
+
+function loadDelegationSnapshot() {
+  if (!fs.existsSync(DELEGATION_SNAPSHOT_FILE)) return {};
+  return JSON.parse(fs.readFileSync(DELEGATION_SNAPSHOT_FILE));
+}
+
+function saveDelegationSnapshot(snapshot) {
+  fs.writeFileSync(DELEGATION_SNAPSHOT_FILE, JSON.stringify(snapshot, null, 2));
 }
 
 async function distributeRewards() {
