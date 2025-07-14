@@ -163,7 +163,7 @@ async function distributeRewards() {
   ]);
 
   const totalVestingShares = parseFloat(props.total_vesting_shares);
-  const totalVestingFundHive = parseFloat(props.total_vesting_fund_steem);
+  const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive);
 
   const totalCurationHive = vestsToHP(
     totalVests,
