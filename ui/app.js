@@ -1,60 +1,58 @@
-async function loadStatus() {
+app.get('/status', async (req, res) => {
   try {
-    const res = await fetch('/last-payout');
-    const data = await res.json();
+    const hive = require('@hiveio/hive-js');
+    await new Promise((resolve) => hive.api.setOptions({ url: 'https://api.hive.blog' }));
 
-    const statusEl = document.getElementById('last-payout');
-    if (!data.last) {
-      statusEl.textContent = '❌ No payout recorded yet';
-      statusEl.style.color = 'red';
-    } else {
-      const date = new Date(data.last);
-      statusEl.textContent = `✅ Last payout: ${date.toLocaleString()}`;
-      const delay = Date.now() - date.getTime();
-      if (delay > 2 * 24 * 60 * 60 * 1000) {
-        statusEl.textContent += ' ⚠️ (Over 2 days ago)';
-        statusEl.style.color = 'red';
+    const HIVE_USER = process.env.HIVE_USER;
+
+    const props = await new Promise((resolve, reject) => {
+      hive.api.getDynamicGlobalProperties((err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      });
+    });
+
+    const totalVestingShares = parseFloat(props.total_vesting_shares);
+    const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive);
+
+    const vestsToHP = (vests) => (vests * totalVestingFundHive) / totalVestingShares;
+
+    // Get recent curation rewards
+    const history = await new Promise((resolve, reject) => {
+      hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      });
+    });
+
+    const now = new Date();
+    const today8AM = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+    today8AM.setHours(8, 0, 0, 0);
+    const fromTime = today8AM.getTime() - 24 * 3600 * 1000;
+
+    let totalCurationVests = 0;
+    for (const [, op] of history) {
+      if (op.op[0] === 'curation_reward') {
+        const ts = new Date(op.timestamp + 'Z').getTime();
+        if (ts >= fromTime && ts < today8AM.getTime()) {
+          totalCurationVests += parseFloat(op.op[1].reward);
+        }
       }
     }
 
-    const rewardRes = await fetch('/reward-cache');
-    const rewardData = await rewardRes.json();
-    const tbody = document.getElementById('reward-table');
-    tbody.innerHTML = '';
-
-    const sorted = Object.entries(rewardData)
-      .filter(([, amt]) => amt > 0)
-      .sort((a, b) => b[1] - a[1]);
-
-    if (sorted.length === 0) {
-      const row = document.createElement('tr');
-      row.innerHTML = '<td colspan="2">✅ No unpaid rewards</td>';
-      tbody.appendChild(row);
+    // Delegators (simulate snapshot)
+    const delegationSnapshot = require(path.join(LOGS_PATH, 'delegation_snapshot.json'));
+    const delegators = {};
+    for (const [user, vests] of Object.entries(delegationSnapshot)) {
+      delegators[user] = vestsToHP(vests);
     }
 
-    for (const [user, amt] of sorted) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>@${user}</td><td>${amt.toFixed(6)} HIVE</td>`;
-      tbody.appendChild(tr);
-    }
-  } catch (e) {
-    console.error('Failed to load status:', e);
-    document.getElementById('last-payout').textContent = '❌ Failed to load status';
-  }
-}
-
-async function triggerPayout() {
-  const confirmed = confirm('Are you sure you want to manually run payout now?');
-  if (!confirmed) return;
-
-  try {
-    const res = await fetch('/run-payout', { method: 'POST' });
-    const result = await res.text();
-    alert(result);
-    loadStatus();
+    res.json({
+      curation_total: (totalCurationVests * totalVestingFundHive) / totalVestingShares,
+      delegators
+    });
   } catch (err) {
-    alert('❌ Failed to run payout manually.');
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch status.' });
   }
-}
-
-loadStatus();
+});
