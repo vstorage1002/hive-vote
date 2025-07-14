@@ -1,34 +1,59 @@
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 const { exec } = require('child_process');
 const app = express();
 const PORT = 3000;
 
-app.use(express.static('../ui')); // serve HTML
-app.use('/logs', express.static('./logs'));
+// === Paths ===
+const UI_PATH = path.join(__dirname, '../ui');
+const LOGS_PATH = path.join(__dirname, '../logs');
+const REWARD_CACHE_PATH = path.join(LOGS_PATH, 'reward_cache.json');
+const PAYOUT_LOG_PATH = path.join(LOGS_PATH, 'payout.log');
+const PAYOUT_SCRIPT = path.join(__dirname, '../scripts/payout.js');
 
+// === Ensure logs/ folder and required files exist ===
+if (!fs.existsSync(LOGS_PATH)) {
+  fs.mkdirSync(LOGS_PATH);
+  console.log('📁 Created logs/ folder');
+}
+
+if (!fs.existsSync(REWARD_CACHE_PATH)) {
+  fs.writeFileSync(REWARD_CACHE_PATH, '{}');
+  console.log('🆕 Created reward_cache.json');
+}
+
+if (!fs.existsSync(PAYOUT_LOG_PATH)) {
+  fs.writeFileSync(PAYOUT_LOG_PATH, '');
+  console.log('🆕 Created payout.log');
+}
+
+// === Serve UI ===
+app.use(express.static(UI_PATH));
+app.use('/logs', express.static(LOGS_PATH));
+
+// === Routes ===
 app.get('/last-payout', (req, res) => {
-  const path = './logs/payout.log';
-  if (!fs.existsSync(path)) return res.json({ last: null });
-
-  const lines = fs.readFileSync(path, 'utf-8').trim().split('\n');
-  const last = lines[lines.length - 1]?.split(' - ')[0];
+  const lines = fs.readFileSync(PAYOUT_LOG_PATH, 'utf-8').trim().split('\n');
+  const last = lines.length ? lines[lines.length - 1].split(' - ')[0] : null;
   res.json({ last });
 });
 
 app.get('/reward-cache', (req, res) => {
-  const path = './logs/reward_cache.json';
-  if (!fs.existsSync(path)) return res.json({});
-  res.json(JSON.parse(fs.readFileSync(path)));
+  res.json(JSON.parse(fs.readFileSync(REWARD_CACHE_PATH)));
 });
 
 app.post('/run-payout', (req, res) => {
-  exec('node ../scripts/payout.js', (err, stdout, stderr) => {
-    if (err) return res.status(500).send('❌ Error running payout.js');
+  exec(`node "${PAYOUT_SCRIPT}"`, (err, stdout, stderr) => {
+    if (err) {
+      console.error(stderr);
+      return res.status(500).send('❌ Error running payout.js');
+    }
     res.send('✅ Payout completed manually.');
   });
 });
 
+// === Start Server ===
 app.listen(PORT, () => {
   console.log(`🖥️ Dashboard running at http://localhost:${PORT}`);
 });
