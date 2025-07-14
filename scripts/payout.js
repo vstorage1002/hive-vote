@@ -7,10 +7,9 @@ const HIVE_USER = process.env.HIVE_USER;
 const ACTIVE_KEY = process.env.ACTIVE_KEY;
 const DELEGATION_WEBHOOK_URL = process.env.DELEGATION_WEBHOOK_URL;
 
-const REWARD_CACHE_FILE = 'ui/reward_cache.json'; // 📁 now inside /ui
-const PAYOUT_LOG_FILE = 'ui/payout.log';          // 📁 now inside /ui
+const REWARD_CACHE_FILE = 'ui/reward_cache.json';
 const DELEGATION_SNAPSHOT_FILE = 'delegation_snapshot.json';
-
+const PAYOUT_LOG_FILE = 'ui/payout.log';
 const MIN_PAYOUT = 0.001;
 
 const API_NODES = [
@@ -21,30 +20,30 @@ const API_NODES = [
   'https://hived.privex.io',
 ];
 
+// 🔔 Webhook utility
 function sendWebhookMessage(content, url) {
   if (!url) return;
+
   const data = JSON.stringify({ content });
   const parsed = new URL(url);
+
   const options = {
     hostname: parsed.hostname,
     path: parsed.pathname + parsed.search,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Content-Length': data.length,
-    },
+      'Content-Length': data.length
+    }
   };
 
-  const req = https.request(options, (res) => {
+  const req = https.request(options, res => {
     if (res.statusCode < 200 || res.statusCode >= 300) {
       console.warn(`⚠️ Webhook failed with status ${res.statusCode}`);
     }
   });
 
-  req.on('error', (error) => {
-    console.error('Webhook error:', error);
-  });
-
+  req.on('error', error => console.error('Webhook error:', error));
   req.write(data);
   req.end();
 }
@@ -53,7 +52,7 @@ async function pickWorkingNode() {
   for (const url of API_NODES) {
     hive.api.setOptions({ url });
     console.log(`🌐 Trying Hive API node: ${url}`);
-    const test = await new Promise((resolve) => {
+    const test = await new Promise(resolve => {
       hive.api.getAccounts([HIVE_USER], (err, res) => {
         resolve(err || !res ? null : res);
       });
@@ -107,7 +106,7 @@ async function fetchFullDelegationHistory() {
     combined.set(d.delegator, combined.get(d.delegator) + d.vests);
   }
 
-  // 🔔 Webhook delegation changes
+  // Compare with previous snapshot
   const previous = loadDelegationSnapshot();
   const current = Object.fromEntries(combined);
 
@@ -202,7 +201,7 @@ async function sendPayout(to, amount) {
 }
 
 function loadRewardCache() {
-  if (!fs.existsSync(REWARD_CACHE_FILE)) return {};
+  if (!fs.existsSync(REWARD_CACHE_FILE)) fs.writeFileSync(REWARD_CACHE_FILE, '{}');
   return JSON.parse(fs.readFileSync(REWARD_CACHE_FILE));
 }
 
@@ -219,9 +218,9 @@ function saveDelegationSnapshot(snapshot) {
   fs.writeFileSync(DELEGATION_SNAPSHOT_FILE, JSON.stringify(snapshot, null, 2));
 }
 
-function appendPayoutLog() {
-  const timestamp = new Date().toISOString();
-  fs.appendFileSync(PAYOUT_LOG_FILE, `${timestamp} - Payout completed\n`);
+function logPayout(dateStr, totalHive) {
+  const line = `${dateStr} - ✅ Payout done: ${totalHive.toFixed(6)} HIVE\n`;
+  fs.appendFileSync(PAYOUT_LOG_FILE, line);
 }
 
 async function distributeRewards() {
@@ -272,7 +271,8 @@ async function distributeRewards() {
   }
 
   saveRewardCache(rewardCache);
-  appendPayoutLog();
+
+  logPayout(new Date().toISOString(), totalCurationHive);
 
   console.log(`🏁 Done. 95% distributed, 5% retained (~${retained.toFixed(6)} HIVE).`);
 }
