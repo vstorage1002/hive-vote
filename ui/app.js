@@ -1,58 +1,74 @@
-app.get('/status', async (req, res) => {
+async function loadStatus() {
   try {
-    const hive = require('@hiveio/hive-js');
-    await new Promise((resolve) => hive.api.setOptions({ url: 'https://api.hive.blog' }));
+    const [lastRes, rewardsRes, statusRes] = await Promise.all([
+      fetch('/last-payout'),
+      fetch('/reward-cache'),
+      fetch('/status')
+    ]);
 
-    const HIVE_USER = process.env.HIVE_USER;
+    const last = await lastRes.json();
+    const rewards = await rewardsRes.json();
+    const status = await statusRes.json();
 
-    const props = await new Promise((resolve, reject) => {
-      hive.api.getDynamicGlobalProperties((err, result) => {
-        if (err) return reject(err);
-        resolve(result);
-      });
-    });
-
-    const totalVestingShares = parseFloat(props.total_vesting_shares);
-    const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive);
-
-    const vestsToHP = (vests) => (vests * totalVestingFundHive) / totalVestingShares;
-
-    // Get recent curation rewards
-    const history = await new Promise((resolve, reject) => {
-      hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, result) => {
-        if (err) return reject(err);
-        resolve(result);
-      });
-    });
-
-    const now = new Date();
-    const today8AM = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
-    today8AM.setHours(8, 0, 0, 0);
-    const fromTime = today8AM.getTime() - 24 * 3600 * 1000;
-
-    let totalCurationVests = 0;
-    for (const [, op] of history) {
-      if (op.op[0] === 'curation_reward') {
-        const ts = new Date(op.timestamp + 'Z').getTime();
-        if (ts >= fromTime && ts < today8AM.getTime()) {
-          totalCurationVests += parseFloat(op.op[1].reward);
-        }
+    // Last payout display
+    const statusEl = document.getElementById('last-payout');
+    if (!last.last) {
+      statusEl.textContent = '❌ No payout recorded yet';
+      statusEl.style.color = 'red';
+    } else {
+      const date = new Date(last.last);
+      statusEl.textContent = `✅ Last payout: ${date.toLocaleString()}`;
+      if (Date.now() - date.getTime() > 2 * 24 * 60 * 60 * 1000) {
+        statusEl.textContent += ' ⚠️ (Over 2 days ago)';
+        statusEl.style.color = 'red';
       }
     }
 
-    // Delegators (simulate snapshot)
-    const delegationSnapshot = require(path.join(LOGS_PATH, 'delegation_snapshot.json'));
-    const delegators = {};
-    for (const [user, vests] of Object.entries(delegationSnapshot)) {
-      delegators[user] = vestsToHP(vests);
+    // Unpaid rewards table
+    const rewardTable = document.getElementById('reward-table');
+    rewardTable.innerHTML = '';
+    const sorted = Object.entries(rewards)
+      .filter(([, amt]) => amt > 0)
+      .sort((a, b) => b[1] - a[1]);
+
+    if (sorted.length === 0) {
+      rewardTable.innerHTML = '<tr><td colspan="2">✅ No unpaid rewards</td></tr>';
+    } else {
+      for (const [user, amt] of sorted) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>@${user}</td><td>${amt.toFixed(6)} HIVE</td>`;
+        rewardTable.appendChild(tr);
+      }
     }
 
-    res.json({
-      curation_total: (totalCurationVests * totalVestingFundHive) / totalVestingShares,
-      delegators
-    });
+    // Curation total
+    document.getElementById('curation-total').textContent = `${status.curation_total.toFixed(6)} HIVE`;
+
+    // Delegators table
+    const delegatorTable = document.getElementById('delegators-table');
+    delegatorTable.innerHTML = '';
+    for (const [user, hp] of Object.entries(status.delegators)) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>@${user}</td><td>${hp.toFixed(3)} HP</td>`;
+      delegatorTable.appendChild(tr);
+    }
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to fetch status.' });
+    document.getElementById('last-payout').textContent = '❌ Failed to load dashboard';
   }
-});
+}
+
+async function triggerPayout() {
+  const confirmed = confirm('Are you sure you want to manually run payout now?');
+  if (!confirmed) return;
+  try {
+    const res = await fetch('/run-payout', { method: 'POST' });
+    const result = await res.text();
+    alert(result);
+    loadStatus();
+  } catch (err) {
+    alert('❌ Failed to run payout manually.');
+  }
+}
+
+loadStatus();
