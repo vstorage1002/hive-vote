@@ -1,73 +1,58 @@
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-const { exec } = require('child_process');
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// === Paths ===
-const UI_PATH = path.join(__dirname, '../ui');
-const LOGS_PATH = path.join(__dirname, '../logs');
-const REWARD_CACHE_PATH = path.join(LOGS_PATH, 'reward_cache.json');
-const PAYOUT_LOG_PATH = path.join(LOGS_PATH, 'payout.log');
-const PAYOUT_SCRIPT = path.join(__dirname, '../scripts/payout.js');
-
-// === Ensure logs/ folder and required files exist ===
-if (!fs.existsSync(LOGS_PATH)) {
-  fs.mkdirSync(LOGS_PATH);
-  console.log('📁 Created logs/ folder');
-}
-
-if (!fs.existsSync(REWARD_CACHE_PATH)) {
-  fs.writeFileSync(REWARD_CACHE_PATH, '{}');
-  console.log('🆕 Created reward_cache.json');
-}
-
-if (!fs.existsSync(PAYOUT_LOG_PATH)) {
-  fs.writeFileSync(PAYOUT_LOG_PATH, '');
-  console.log('🆕 Created payout.log');
-}
-
-// === Serve UI ===
-app.use(express.static(UI_PATH));
-app.use('/logs', express.static(LOGS_PATH));
-
-// ✅ Force index.html on root
-app.get('/', (req, res) => {
-  res.sendFile(path.join(UI_PATH, 'index.html'));
-});
-
-// === Routes ===
-app.get('/last-payout', (req, res) => {
+app.get('/status', async (req, res) => {
   try {
-    const lines = fs.readFileSync(PAYOUT_LOG_PATH, 'utf-8').trim().split('\n');
-    const last = lines.length ? lines[lines.length - 1].split(' - ')[0] : null;
-    res.json({ last });
-  } catch (e) {
-    res.json({ last: null });
-  }
-});
+    const hive = require('@hiveio/hive-js');
+    await new Promise((resolve) => hive.api.setOptions({ url: 'https://api.hive.blog' }));
 
-app.get('/reward-cache', (req, res) => {
-  try {
-    const data = fs.readFileSync(REWARD_CACHE_PATH);
-    res.json(JSON.parse(data));
-  } catch (e) {
-    res.json({});
-  }
-});
+    const HIVE_USER = process.env.HIVE_USER;
 
-app.post('/run-payout', (req, res) => {
-  exec(`node "${PAYOUT_SCRIPT}"`, (err, stdout, stderr) => {
-    if (err) {
-      console.error(stderr);
-      return res.status(500).send('❌ Error running payout.js');
+    const props = await new Promise((resolve, reject) => {
+      hive.api.getDynamicGlobalProperties((err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      });
+    });
+
+    const totalVestingShares = parseFloat(props.total_vesting_shares);
+    const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive);
+
+    const vestsToHP = (vests) => (vests * totalVestingFundHive) / totalVestingShares;
+
+    // Get recent curation rewards
+    const history = await new Promise((resolve, reject) => {
+      hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      });
+    });
+
+    const now = new Date();
+    const today8AM = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+    today8AM.setHours(8, 0, 0, 0);
+    const fromTime = today8AM.getTime() - 24 * 3600 * 1000;
+
+    let totalCurationVests = 0;
+    for (const [, op] of history) {
+      if (op.op[0] === 'curation_reward') {
+        const ts = new Date(op.timestamp + 'Z').getTime();
+        if (ts >= fromTime && ts < today8AM.getTime()) {
+          totalCurationVests += parseFloat(op.op[1].reward);
+        }
+      }
     }
-    res.send('✅ Payout completed manually.');
-  });
-});
 
-// === Start Server ===
-app.listen(PORT, () => {
-  console.log(`🖥️ Dashboard running at http://localhost:${PORT}`);
+    // Delegators (simulate snapshot)
+    const delegationSnapshot = require(path.join(LOGS_PATH, 'delegation_snapshot.json'));
+    const delegators = {};
+    for (const [user, vests] of Object.entries(delegationSnapshot)) {
+      delegators[user] = vestsToHP(vests);
+    }
+
+    res.json({
+      curation_total: (totalCurationVests * totalVestingFundHive) / totalVestingShares,
+      delegators
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch status.' });
+  }
 });
