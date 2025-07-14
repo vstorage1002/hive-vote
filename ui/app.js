@@ -1,39 +1,39 @@
-async function loadStatus() {
-  const res = await fetch('/last-payout');
-  const data = await res.json();
+async function loadDashboard() {
+  try {
+    // Load last payout from payout.log
+    const logText = await fetch('payout.log').then(r => r.text());
+    const lines = logText.trim().split('\n');
+    const lastEntry = lines.pop();
+    const lastDateStr = lastEntry?.split(' - ')[0];
+    const lastDate = new Date(lastDateStr);
 
-  const statusEl = document.getElementById('last-payout');
-  if (!data.last) {
-    statusEl.textContent = '❌ No payout recorded yet';
-    statusEl.style.color = 'red';
-  } else {
-    const date = new Date(data.last);
-    statusEl.textContent = `✅ Last payout: ${date.toLocaleString()}`;
-    if (Date.now() - new Date(data.last).getTime() > 48 * 3600 * 1000) {
-      statusEl.style.color = 'red';
-      statusEl.textContent += ' ⚠️ (More than 2 days ago)';
+    const lastPayoutEl = document.getElementById('last-payout');
+    if (!isNaN(lastDate)) {
+      const now = new Date();
+      const diffDays = (now - lastDate) / (1000 * 60 * 60 * 24);
+      lastPayoutEl.textContent = `✅ Last payout: ${lastDate.toLocaleString()}`;
+      if (diffDays > 1.5) {
+        lastPayoutEl.classList.add('warn');
+        lastPayoutEl.textContent += ' ⚠️ Missed payout (over 1 day ago)';
+      }
+    } else {
+      lastPayoutEl.textContent = '❌ No valid payout logs found.';
+      lastPayoutEl.classList.add('warn');
     }
-  }
 
-  const rewardRes = await fetch('/reward-cache');
-  const rewardData = await rewardRes.json();
-  const tbody = document.getElementById('reward-table');
-  tbody.innerHTML = '';
-
-  for (const user in rewardData) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>@${user}</td><td>${rewardData[user].toFixed(6)} HIVE</td>`;
-    tbody.appendChild(tr);
+    // Load reward cache
+    const rewardData = await fetch('reward_cache.json').then(r => r.json());
+    const tbody = document.getElementById('reward-table');
+    tbody.innerHTML = '';
+    for (const user in rewardData) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>@${user}</td><td>${rewardData[user].toFixed(6)} HIVE</td>`;
+      tbody.appendChild(tr);
+    }
+  } catch (err) {
+    document.getElementById('last-payout').textContent = '⚠️ Failed to load dashboard data.';
+    console.error(err);
   }
 }
 
-async function triggerPayout() {
-  const confirmed = confirm('Are you sure you want to run payout now?');
-  if (!confirmed) return;
-  const res = await fetch('/run-payout', { method: 'POST' });
-  const result = await res.text();
-  alert(result);
-  loadStatus(); // reload info
-}
-
-loadStatus();
+loadDashboard();
