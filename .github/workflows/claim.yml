@@ -28,3 +28,6 @@ jobs:
           ACTIVE_KEY: ${{ secrets.ACTIVE_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: node scripts/claim.js
+
+
+         # Start for running the code
