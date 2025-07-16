@@ -20,9 +20,14 @@ const API_NODES = [
   'https://hived.privex.io',
 ];
 
-// 🔔 Webhook utility
+// ✅ Fixed Webhook Function
 function sendWebhookMessage(content, url) {
-  if (!url) return;
+  if (!url || typeof content !== 'string' || content.trim() === '') return;
+
+  // Discord limit is 2000 characters
+  if (content.length > 2000) {
+    content = content.substring(0, 1997) + '...';
+  }
 
   const data = JSON.stringify({ content });
   const parsed = new URL(url);
@@ -33,7 +38,7 @@ function sendWebhookMessage(content, url) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Content-Length': data.length
+      'Content-Length': Buffer.byteLength(data)
     }
   };
 
@@ -106,7 +111,6 @@ async function fetchFullDelegationHistory() {
     combined.set(d.delegator, combined.get(d.delegator) + d.vests);
   }
 
-  // Compare with previous snapshot
   const previous = loadDelegationSnapshot();
   const current = Object.fromEntries(combined);
 
