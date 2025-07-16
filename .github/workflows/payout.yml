@@ -1,31 +1,29 @@
-name: Hive Payout with Dry Run
+name: Hive Payout
 
 on:
+  schedule:
+    - cron: '0 1 * * *'  # Runs every day at 9:00 AM (Asia/Manila)
   workflow_dispatch:
 
 jobs:
   payout:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: 🔧 Set up Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: 18
 
-      - name: 📦 Install dependencies
+      - name: Install dependencies
         run: npm install
 
-      - name: 🧱 Initialize SQLite database
-        run: node scripts/init_db.js
-
-      - name: 💸 Run payout with DRY_RUN mode
+      - name: Run payout script
+        run: node scripts/payout.js
         env:
           HIVE_USER: ${{ secrets.HIVE_USER }}
           ACTIVE_KEY: ${{ secrets.ACTIVE_KEY }}
           DELEGATION_WEBHOOK_URL: ${{ secrets.DELEGATION_WEBHOOK_URL }}
-          DRY_RUN: true
-        run: node scripts/payout.js
