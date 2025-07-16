@@ -1,4 +1,4 @@
-// payout.js - Full Adjusted with SQLite Integration + DRY_RUN Support
+// payout.js - Full Adjusted with SQLite Integration (Real Payout)
 const hive = require('@hiveio/hive-js');
 const https = require('https');
 const sqlite3 = require('sqlite3').verbose();
@@ -138,13 +138,6 @@ async function sendPayout(to, amount) {
     day: 'numeric'
   });
   const memo = `Thank you for your delegation to @${HIVE_USER} — ${phDate}`;
-
-  // DRY RUN: Just log the payout
-  if (process.env.DRY_RUN === 'true') {
-    console.log(`[DRY RUN] Would send ${amount.toFixed(3)} HIVE to @${to} — Memo: "${memo}"`);
-    return;
-  }
-
   return new Promise((resolve, reject) => {
     hive.broadcast.transfer(ACTIVE_KEY, HIVE_USER, to, `${amount.toFixed(3)} HIVE`, memo, (err, result) => {
       if (err) return reject(err);
