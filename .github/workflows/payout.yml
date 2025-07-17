@@ -2,7 +2,7 @@ name: Hive Payout
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # Runs every day at 9:00 AM (Asia/Manila, which is UTC+8)
+    - cron: '0 1 * * *'  # Runs every day at 9:00 AM Asia/Manila (which is UTC+8)
   workflow_dispatch:
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Initialize SQLite DB
+      - name: Initialize database
         run: node scripts/init_db.js
 
       - name: Run payout script
