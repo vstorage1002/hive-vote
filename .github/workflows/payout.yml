@@ -2,12 +2,12 @@ name: Hive Payout
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # Runs every day at 9:00 AM (Asia/Manila)
+    - cron: '0 1 * * *'  # Runs every day at 9:00 AM (Asia/Manila, which is UTC+8)
   workflow_dispatch:
 
 jobs:
   payout:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04   # Use a specific Ubuntu version for consistency
 
     steps:
       - name: Checkout code
@@ -20,6 +20,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Initialize SQLite DB
+        run: node scripts/init_db.js
 
       - name: Run payout script
         run: node scripts/payout.js
