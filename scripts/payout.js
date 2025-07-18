@@ -98,24 +98,39 @@ async function getCurationRewards() {
   return totalVests;
 }
 
-function getYesterdayDateStr() {
-  const ph = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
-  ph.setHours(8, 0, 0, 0);
-  const yesterday = new Date(ph.getTime() - 86400000);
-  return yesterday.toISOString().slice(0, 10);
+function syncDelegationsFromHive(callback) {
+  hive.api.getVestingDelegations(HIVE_USER, '', 1000, (err, delegations) => {
+    if (err) return callback(err);
+
+    const now = new Date().toISOString();
+    const stmt = db.prepare(`
+      INSERT INTO delegation_periods (delegator, start_time, vesting_shares)
+      VALUES (?, ?, ?)
+    `);
+
+    db.serialize(() => {
+      db.run('DELETE FROM delegation_periods'); // Optional: clear old data
+
+      for (const d of delegations) {
+        stmt.run(d.delegator, now, d.vesting_shares);
+      }
+
+      stmt.finalize(() => {
+        console.log(`✅ Synced ${delegations.length} delegators from Hive.`);
+        callback(null);
+      });
+    });
+  });
 }
 
-// ✅ FIXED + DEBUG LOGGING
 function getEligibleDelegationVests(callback) {
   const today = new Date();
   today.setHours(8, 0, 0, 0);
   const cutoff = new Date(today.getTime() - 7 * 86400000);
-  const rewardDate = new Date(today.getTime() - 86400000); // yesterday
-
-  const cutoffStr = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
+  const rewardDate = new Date(today.getTime() - 86400000);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
   const rewardStr = rewardDate.toISOString().slice(0, 10);
 
-  // DEBUG: Print all delegation records
   db.all(`SELECT * FROM delegation_periods`, [], (err, rows) => {
     if (err) {
       console.error('🚨 Failed to read delegation_periods:', err);
@@ -125,7 +140,6 @@ function getEligibleDelegationVests(callback) {
     }
   });
 
-  // Actual query to get eligible delegators
   db.all(`
     SELECT delegator, SUM(CAST(REPLACE(vesting_shares, ' VESTS', '') AS REAL)) AS total_vests
     FROM delegation_periods
@@ -182,7 +196,6 @@ async function distributeRewards() {
     const totalVests = Object.values(delegators).reduce((a, b) => a + b, 0);
 
     console.log(`📦 Found ${Object.keys(delegators).length} eligible delegators.`);
-
     if (totalVests <= 0) return console.log('⚠️ No eligible delegators.');
 
     for (const [delegator, vests] of Object.entries(delegators)) {
@@ -206,4 +219,11 @@ async function distributeRewards() {
   });
 }
 
-distributeRewards().catch(console.error);
+// Run all
+syncDelegationsFromHive((err) => {
+  if (err) {
+    console.error('❌ Delegation sync failed:', err);
+  } else {
+    distributeRewards().catch(console.error);
+  }
+});
