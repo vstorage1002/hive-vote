@@ -105,20 +105,33 @@ function getYesterdayDateStr() {
   return yesterday.toISOString().slice(0, 10);
 }
 
+// ✅ FIXED + DEBUG LOGGING
 function getEligibleDelegationVests(callback) {
   const today = new Date();
   today.setHours(8, 0, 0, 0);
   const cutoff = new Date(today.getTime() - 7 * 86400000);
   const rewardDate = new Date(today.getTime() - 86400000); // yesterday
-  const cutoffStr = cutoff.toISOString();
+
+  const cutoffStr = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
   const rewardStr = rewardDate.toISOString().slice(0, 10);
 
+  // DEBUG: Print all delegation records
+  db.all(`SELECT * FROM delegation_periods`, [], (err, rows) => {
+    if (err) {
+      console.error('🚨 Failed to read delegation_periods:', err);
+    } else {
+      console.log('📋 delegation_periods content:');
+      console.table(rows);
+    }
+  });
+
+  // Actual query to get eligible delegators
   db.all(`
     SELECT delegator, SUM(CAST(REPLACE(vesting_shares, ' VESTS', '') AS REAL)) AS total_vests
     FROM delegation_periods
-    WHERE datetime(start_time) <= ? AND (end_time IS NULL OR datetime(end_time) >= ?)
+    WHERE date(start_time) <= date(?) AND (end_time IS NULL OR date(end_time) >= date(?))
     GROUP BY delegator
-  `, [cutoffStr, rewardDate.toISOString()], (err, rows) => {
+  `, [cutoffStr, rewardStr], (err, rows) => {
     if (err) return callback(err);
     const result = {};
     rows.forEach(r => result[r.delegator] = r.total_vests);
@@ -167,6 +180,9 @@ async function distributeRewards() {
   getEligibleDelegationVests(async (err, rewardDate, delegators) => {
     if (err) return console.error(err);
     const totalVests = Object.values(delegators).reduce((a, b) => a + b, 0);
+
+    console.log(`📦 Found ${Object.keys(delegators).length} eligible delegators.`);
+
     if (totalVests <= 0) return console.log('⚠️ No eligible delegators.');
 
     for (const [delegator, vests] of Object.entries(delegators)) {
