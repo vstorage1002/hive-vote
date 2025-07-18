@@ -7,7 +7,8 @@ db.serialize(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     delegator TEXT NOT NULL,
     start_time TEXT NOT NULL,
-    end_time TEXT
+    end_time TEXT,
+    vesting_shares TEXT NOT NULL
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS rewarded_days (
