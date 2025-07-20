@@ -5,9 +5,12 @@ on:
     - cron: '0 1 * * *'  # Runs every day at 9:00 AM Asia/Manila (which is UTC+8)
   workflow_dispatch:
 
+permissions:
+  contents: write  # Allow commit/push
+
 jobs:
   payout:
-    runs-on: ubuntu-22.04   # Use a specific Ubuntu version for consistency
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout code
@@ -30,3 +33,11 @@ jobs:
           HIVE_USER: ${{ secrets.HIVE_USER }}
           ACTIVE_KEY: ${{ secrets.ACTIVE_KEY }}
           DELEGATION_WEBHOOK_URL: ${{ secrets.DELEGATION_WEBHOOK_URL }}
+
+      - name: Commit and push updated reward and log files
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ui/reward_cache.json ui/payout.log delegation_snapshot.json
+          git commit -m "🤖 Update reward data and logs [auto]" || echo "No changes to commit"
+          git push
