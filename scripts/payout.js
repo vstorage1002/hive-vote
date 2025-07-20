@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { Client } = require("dhive");
+const hive = require('@hiveio/hive-js');
 require("dotenv").config();
 
 const client = new Client("https://api.hive.blog");
