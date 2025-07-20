@@ -5,7 +5,7 @@ require("dotenv").config();
 
 const client = new dhive.Client(["https://api.hive.blog"]);
 const HIVE_USER = process.env.HIVE_USER;
-const FILE_PATH = path.join(__dirname, "../delegation_history.json");
+const FILE_PATH = path.join(__dirname, "script/delegation_history.json");
 
 async function fetchDelegations(account) {
   let delegations = [];
