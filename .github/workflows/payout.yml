@@ -34,16 +34,10 @@ jobs:
           ACTIVE_KEY: ${{ secrets.ACTIVE_KEY }}
           DELEGATION_WEBHOOK_URL: ${{ secrets.DELEGATION_WEBHOOK_URL }}
 
-     - name: Commit and push updated reward and log files
+      - name: Commit and push updated reward and log files
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # Only add files if they exist
-          if [ -f ui/reward_cache.json ]; then git add ui/reward_cache.json; fi
-          if [ -f ui/payout.log ]; then git add ui/payout.log; fi
-          if [ -f delegation_snapshot.json ]; then git add delegation_snapshot.json; fi
-          if [ -f delegation_history.json ]; then git add delegation_history.json; fi
-
+          git add ui/reward_cache.json ui/payout.log delegation_snapshot.json
           git commit -m "🤖 Update reward data and logs [auto]" || echo "No changes to commit"
           git push
