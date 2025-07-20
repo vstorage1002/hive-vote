@@ -9,7 +9,7 @@ const DELEGATION_WEBHOOK_URL = process.env.DELEGATION_WEBHOOK_URL;
 
 const REWARD_CACHE_FILE = 'ui/reward_cache.json';
 const PAYOUT_LOG_FILE = 'ui/payout.log';
-const DELEGATION_HISTORY_FILE = 'delegation_history.json';
+const DELEGATION_HISTORY_FILE = 'script/delegation_history.json';
 const MIN_PAYOUT = 0.001;
 
 const API_NODES = [
