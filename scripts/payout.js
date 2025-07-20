@@ -1,6 +1,5 @@
 const fs = require("fs");
 const path = require("path");
-const hive = require("hive-keychain");
 const { Client } = require("dhive");
 require("dotenv").config();
 
