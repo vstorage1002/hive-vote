@@ -3,7 +3,7 @@ const path = require("path");
 require("dotenv").config();
 
 const HIVE_USER = process.env.HIVE_USER;
-const delegationHistoryFile = path.join(__dirname, "../delegation_history.json");
+const delegationHistoryFile = path.join(__dirname, "delegation_history.json");
 
 let delegationHistory = {};
 if (fs.existsSync(delegationHistoryFile)) {
