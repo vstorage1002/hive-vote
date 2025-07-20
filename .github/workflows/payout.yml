@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # Allow commit/push
+  contents: write  # Required to commit and push changes
 
 jobs:
   payout:
@@ -27,6 +27,11 @@ jobs:
       - name: Initialize database
         run: node scripts/init_db.js
 
+      - name: Update delegation history
+        run: node scripts/update_delegation_history.js
+        env:
+          HIVE_USER: ${{ secrets.HIVE_USER }}
+
       - name: Run payout script
         run: node scripts/payout.js
         env:
@@ -38,11 +43,15 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # Only add files if they exist
-          [ -f ui/reward_cache.json ] && git add ui/reward_cache.json
-          [ -f ui/payout.log ] && git add ui/payout.log
-          [ -f scripts/delegation_history.json ] && git add scripts/delegation_history.json
-          
-          git commit -m "🤖 Update reward data and logs [auto]" || echo "No changes to commit"
-          git push
+          FILES_TO_COMMIT=""
+          if [ -f ui/reward_cache.json ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT ui/reward_cache.json"; fi
+          if [ -f ui/payout.log ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT ui/payout.log"; fi
+          if [ -f delegation_snapshot.json ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT delegation_snapshot.json"; fi
+          if [ -f scripts/delegation_history.json ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT scripts/delegation_history.json"; fi
+          if [ -n "$FILES_TO_COMMIT" ]; then
+            git add $FILES_TO_COMMIT
+            git commit -m "🤖 Update reward data and logs [auto]" || echo "No changes to commit"
+            git push
+          else
+            echo "📭 No files to commit."
+          fi
