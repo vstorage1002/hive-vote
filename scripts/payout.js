@@ -1,20 +1,278 @@
-const fs = require("fs");
-const path = require("path");
-require("dotenv").config();
+const hive = require('@hiveio/hive-js');
+const fs = require('fs');
+const https = require('https');
+require('dotenv').config();
 
 const HIVE_USER = process.env.HIVE_USER;
-const delegationHistoryFile = path.join(__dirname, "delegation_history.json");
+const ACTIVE_KEY = process.env.ACTIVE_KEY;
+const DELEGATION_WEBHOOK_URL = process.env.DELEGATION_WEBHOOK_URL;
 
-let delegationHistory = {};
-if (fs.existsSync(delegationHistoryFile)) {
-  delegationHistory = JSON.parse(fs.readFileSync(delegationHistoryFile, "utf-8"));
-} else {
-  console.warn("⚠️ No delegation_history.json found.");
+const REWARD_CACHE_FILE = 'ui/reward_cache.json';
+const PAYOUT_LOG_FILE = 'ui/payout.log';
+const DELEGATION_HISTORY_FILE = 'delegation_history.json';
+const MIN_PAYOUT = 0.001;
+
+const API_NODES = [
+  'https://api.hive.blog',
+  'https://api.openhive.network',
+  'https://anyx.io',
+  'https://rpc.ausbit.dev',
+  'https://hived.privex.io',
+];
+
+function sendWebhookMessage(content, url) {
+  if (!url) return;
+  const data = JSON.stringify({ content });
+  const parsed = new URL(url);
+
+  const options = {
+    hostname: parsed.hostname,
+    path: parsed.pathname + parsed.search,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': data.length
+    }
+  };
+
+  const req = https.request(options, res => {
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      console.warn(`⚠️ Webhook failed with status ${res.statusCode}`);
+    }
+  });
+
+  req.on('error', error => console.error('Webhook error:', error));
+  req.write(data);
+  req.end();
 }
 
-console.log(`👤 Testing as @${HIVE_USER}`);
-console.log("🧾 Current Delegation History:");
-console.log(JSON.stringify(delegationHistory, null, 2));
+async function pickWorkingNode() {
+  for (const url of API_NODES) {
+    hive.api.setOptions({ url });
+    console.log(`🌐 Trying Hive API node: ${url}`);
+    const test = await new Promise(resolve => {
+      hive.api.getAccounts([HIVE_USER], (err, res) => {
+        resolve(err || !res ? null : res);
+      });
+    });
+    if (test) {
+      console.log(`✅ Using Hive API: ${url}`);
+      return;
+    }
+  }
+  throw new Error('❌ No working Hive API found.');
+}
 
-console.log("‼️ Skipping payouts for this test run.");
-process.exit(0);
+function loadDelegationHistory() {
+  if (!fs.existsSync(DELEGATION_HISTORY_FILE)) fs.writeFileSync(DELEGATION_HISTORY_FILE, '[]');
+  return JSON.parse(fs.readFileSync(DELEGATION_HISTORY_FILE));
+}
+
+function saveDelegationHistory(data) {
+  fs.writeFileSync(DELEGATION_HISTORY_FILE, JSON.stringify(data, null, 2));
+}
+
+async function fetchFullDelegationHistory() {
+  let start = -1;
+  const limit = 1000;
+  const rawHistory = [];
+
+  while (true) {
+    const history = await new Promise((resolve, reject) => {
+      hive.api.getAccountHistory(HIVE_USER, start, limit, (err, res) => {
+        if (err) return reject(err);
+        resolve(res);
+      });
+    });
+
+    if (!history || history.length === 0) break;
+    rawHistory.push(...history);
+    start = history[0][0] - 1;
+    if (history.length < limit) break;
+  }
+
+  const delegations = [];
+  for (const [, op] of rawHistory) {
+    if (op.op[0] === 'delegate_vesting_shares') {
+      const { delegator, delegatee, vesting_shares } = op.op[1];
+      const timestamp = new Date(op.timestamp + 'Z').getTime();
+
+      if (delegatee === HIVE_USER) {
+        delegations.push({
+          delegator,
+          vests: parseFloat(vesting_shares),
+          timestamp
+        });
+      }
+    }
+  }
+
+  const result = {};
+  for (const d of delegations) {
+    if (!result[d.delegator]) result[d.delegator] = [];
+    result[d.delegator].push({ vests: d.vests, timestamp: d.timestamp });
+  }
+
+  for (const user in result) {
+    const chunks = result[user];
+    const filtered = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const prev = i === 0 ? 0 : chunks[i - 1].vests;
+      const diff = chunks[i].vests - prev;
+      if (diff !== 0) {
+        filtered.push({ vests: diff, timestamp: chunks[i].timestamp });
+      }
+    }
+    result[user] = filtered;
+  }
+
+  saveDelegationHistory(result);
+  return result;
+}
+
+async function getCurationRewards() {
+  const now = new Date();
+  const phTz = 'Asia/Manila';
+  const today8AM = new Date(now.toLocaleString('en-US', { timeZone: phTz }));
+  today8AM.setHours(8, 0, 0, 0);
+  const fromTime = today8AM.getTime() - 24 * 60 * 60 * 1000;
+
+  const history = await new Promise((resolve, reject) => {
+    hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, res) => {
+      if (err) return reject(err);
+      resolve(res);
+    });
+  });
+
+  let totalVests = 0;
+  for (const [, op] of history) {
+    if (op.op[0] === 'curation_reward') {
+      const opTime = new Date(op.timestamp + 'Z').getTime();
+      if (opTime >= fromTime && opTime < today8AM.getTime()) {
+        totalVests += parseFloat(op.op[1].reward);
+      }
+    }
+  }
+  return totalVests;
+}
+
+async function getDynamicProps() {
+  return new Promise((resolve, reject) => {
+    hive.api.getDynamicGlobalProperties((err, res) => {
+      if (err) return reject(err);
+      resolve(res);
+    });
+  });
+}
+
+function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
+  return (vests * totalVestingFundHive) / totalVestingShares;
+}
+
+async function sendPayout(to, amount) {
+  const phDate = new Date().toLocaleDateString('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
+  const memo = `Thank you for your delegation to @${HIVE_USER} — ${phDate}`;
+
+  return new Promise((resolve, reject) => {
+    hive.broadcast.transfer(
+      ACTIVE_KEY,
+      HIVE_USER,
+      to,
+      `${amount.toFixed(3)} HIVE`,
+      memo,
+      (err, result) => {
+        if (err) return reject(err);
+        console.log(`✅ Sent ${amount.toFixed(3)} HIVE to @${to}`);
+        resolve(result);
+      }
+    );
+  });
+}
+
+function loadRewardCache() {
+  if (!fs.existsSync(REWARD_CACHE_FILE)) fs.writeFileSync(REWARD_CACHE_FILE, '{}');
+  return JSON.parse(fs.readFileSync(REWARD_CACHE_FILE));
+}
+
+function saveRewardCache(cache) {
+  fs.writeFileSync(REWARD_CACHE_FILE, JSON.stringify(cache, null, 2));
+}
+
+function logPayout(dateStr, totalHive) {
+  const line = `${dateStr} - ✅ Payout done: ${totalHive.toFixed(6)} HIVE\n`;
+  fs.appendFileSync(PAYOUT_LOG_FILE, line);
+}
+
+async function distributeRewards() {
+  console.log(`🚀 Calculating rewards for @${HIVE_USER}...`);
+  await pickWorkingNode();
+
+  const [props, delegationChunks, totalVests] = await Promise.all([
+    getDynamicProps(),
+    fetchFullDelegationHistory(),
+    getCurationRewards()
+  ]);
+
+  const totalVestingShares = parseFloat(props.total_vesting_shares);
+  const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive);
+
+  const totalCurationHive = vestsToHP(
+    totalVests,
+    totalVestingFundHive,
+    totalVestingShares
+  );
+
+  console.log(`📊 Total curation rewards in last 24h: ~${totalCurationHive.toFixed(6)} HIVE`);
+
+  if (totalCurationHive < 0.000001 || Object.keys(delegationChunks).length === 0) {
+    console.log('⚠️ Nothing to distribute.');
+    return;
+  }
+
+  const retained = totalCurationHive * 0.05;
+  const distributable = totalCurationHive * 0.95;
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+  let eligibleTotal = 0;
+  const eligibleDelegators = {};
+
+  for (const [delegator, chunks] of Object.entries(delegationChunks)) {
+    let eligibleVests = 0;
+    for (const chunk of chunks) {
+      if (chunk.timestamp <= cutoff && chunk.vests > 0) {
+        eligibleVests += chunk.vests;
+      }
+    }
+    if (eligibleVests > 0) {
+      eligibleDelegators[delegator] = eligibleVests;
+      eligibleTotal += eligibleVests;
+    }
+  }
+
+  const rewardCache = loadRewardCache();
+
+  for (const [delegator, eligibleVests] of Object.entries(eligibleDelegators)) {
+    const share = eligibleVests / eligibleTotal;
+    const payout = distributable * share;
+    rewardCache[delegator] = (rewardCache[delegator] || 0) + payout;
+
+    if (rewardCache[delegator] >= MIN_PAYOUT) {
+      await sendPayout(delegator, rewardCache[delegator]);
+      rewardCache[delegator] = 0;
+    } else {
+      console.log(`📦 Stored for @${delegator}: ${rewardCache[delegator].toFixed(6)} HIVE`);
+    }
+  }
+
+  saveRewardCache(rewardCache);
+  logPayout(new Date().toISOString(), totalCurationHive);
+  console.log(`🏁 Done. 95% distributed, 5% retained (~${retained.toFixed(6)} HIVE).`);
+}
+
+distributeRewards().catch(console.error);
