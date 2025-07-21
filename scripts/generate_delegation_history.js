@@ -1,4 +1,3 @@
-// scripts/generate_delegation_history.js
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -7,31 +6,39 @@ const hive = require('@hiveio/hive-js');
 const ACCOUNT = process.env.HIVE_USER;
 const OUTPUT_FILE = path.join(__dirname, 'delegation_history.json');
 
-async function getDynamicProps() {
+// Get Hive Power converter
+async function getHPConverter() {
   const props = await hive.api.getDynamicGlobalPropertiesAsync();
   const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive);
   const totalVestingShares = parseFloat(props.total_vesting_shares);
   return (vests) => parseFloat(vests) * totalVestingFundHive / totalVestingShares;
 }
 
-async function getFollowers(account) {
+// Get all delegators to the account
+async function getAllDelegators(delegatee) {
   let start = '';
-  let followers = [];
+  let delegators = [];
   let done = false;
 
   while (!done) {
-    const chunk = await hive.api.getFollowersAsync(account, start, 'blog', 100);
-    if (chunk.length === 0) break;
-    followers.push(...chunk.map(f => f.follower));
-    start = chunk[chunk.length - 1].follower;
-    if (chunk.length < 100) done = true;
+    const chunk = await hive.api.getVestingDelegationsAsync(start, 100);
+    if (!chunk || chunk.length === 0) break;
+
+    for (const entry of chunk) {
+      if (entry.delegatee === delegatee) {
+        delegators.push(entry.delegator);
+      }
+    }
+
+    if (chunk.length < 100) break;
+    start = chunk[chunk.length - 1].delegator;
   }
 
-  return [...new Set(followers)];
+  return [...new Set(delegators)];
 }
 
 (async () => {
-  const vestsToHP = await getDynamicProps();
+  const vestsToHP = await getHPConverter();
 
   let oldData = {};
   if (fs.existsSync(OUTPUT_FILE)) {
@@ -42,16 +49,14 @@ async function getFollowers(account) {
     }
   }
 
-  const followers = await getFollowers(ACCOUNT);
-  const candidates = [...new Set([...Object.keys(oldData), ...followers])];
-
-  console.log(`🔍 Checking delegations to @${ACCOUNT} from ${candidates.length} possible accounts...`);
+  const delegators = await getAllDelegators(ACCOUNT);
+  console.log(`🔍 Found ${delegators.length} delegators to @${ACCOUNT}`);
 
   let changed = false;
 
-  for (const user of candidates) {
+  for (const user of delegators) {
     try {
-      const delegations = await hive.api.getVestingDelegationsAsync(user, '', 100);
+      const delegations = await hive.api.getVestingDelegationsAsync(user, ACCOUNT, 100);
       const entry = delegations.find(d => d.delegatee === ACCOUNT);
 
       const hp = entry ? parseFloat(vestsToHP(entry.vesting_shares).toFixed(3)) : 0;
@@ -64,10 +69,10 @@ async function getFollowers(account) {
         if (!oldData[user]) oldData[user] = [];
         oldData[user].push({ amount: hp, timestamp });
         changed = true;
-        console.log(`🔁 Updated delegation from @${user}: ${hp} HP`);
+        console.log(`🔁 Delegation updated for @${user}: ${hp} HP`);
       }
     } catch (err) {
-      console.warn(`⚠️ Error checking delegation from @${user}: ${err.message}`);
+      console.warn(`⚠️ Error fetching delegation for @${user}: ${err.message}`);
     }
   }
 
