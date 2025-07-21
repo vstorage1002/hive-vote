@@ -1,103 +1,147 @@
-// payout.js (adjusted for safe testing)
+// payout.js (Testing version — no real payouts)
 
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const { Client } = require('@hiveio/dhive');
+const { Client } = require('hive-js');
 const sqlite3 = require('sqlite3').verbose();
 
-const client = new Client(['https://api.hive.blog']);
-const ACCOUNT = process.env.HIVE_ACCOUNT;
-const REWARD_PERCENT = 0.95;
+const client = new Client(process.env.HIVE_API || 'https://api.hive.blog');
 
-const db = new sqlite3.Database('payouts.db');
-const CURATION_LOG_PATH = path.join(__dirname, '../ui/curation_breakdown.log');
-const PAYOUT_LOG_PATH = path.join(__dirname, '../ui/payout.log');
+const DB_PATH = './data/hive_rewards.db';
+const breakdownLogPath = path.join(__dirname, '../ui/curation_breakdown.log');
+const payoutLogPath = path.join(__dirname, '../ui/payout.log');
 
-function convertVestsToHive(vests, totalVestingShares, totalVestingFundHive) {
-  return (parseFloat(totalVestingFundHive) * parseFloat(vests)) / parseFloat(totalVestingShares);
-}
-
-async function getCurationRewards() {
+function getStartOfDayTimestamp() {
   const now = new Date();
-  const endTime = new Date(now);
-  endTime.setHours(8, 0, 0, 0);
-  if (now < endTime) endTime.setDate(endTime.getDate() - 1);
-  const startTime = new Date(endTime);
-  startTime.setDate(startTime.getDate() - 1);
-
-  const history = await client.database.call('get_account_history', [ACCOUNT, -1, 1000]);
-  const vestingInfo = await client.database.getDynamicGlobalProperties();
-
-  let totalCuration = 0;
-  for (const [, op] of history.reverse()) {
-    const [type, data] = op.op;
-    if (type === 'curation_reward') {
-      const timestamp = new Date(op.timestamp + 'Z');
-      if (timestamp >= startTime && timestamp < endTime) {
-        const hive = convertVestsToHive(data.reward, vestingInfo.total_vesting_shares, vestingInfo.total_vesting_fund_hive);
-        totalCuration += hive;
-      }
-    }
+  if (now.getHours() < 8) {
+    now.setDate(now.getDate() - 1);
   }
-  return { amount: totalCuration, startTime, endTime };
+  now.setHours(8, 0, 0, 0);
+  return Math.floor(now.getTime() / 1000);
 }
 
-function getDelegationPeriods(dateStr) {
+function vestsToHP(vests, totalVestingShares, totalVestingFundHive) {
+  return parseFloat(vests) * totalVestingFundHive / totalVestingShares;
+}
+
+function getGlobalProps() {
   return new Promise((resolve, reject) => {
-    db.all('SELECT delegator, amount FROM delegation_periods WHERE start_date <= ? AND (end_date IS NULL OR end_date >= ?)', [dateStr, dateStr], (err, rows) => {
-      if (err) return reject(err);
-      resolve(rows);
-    });
+    client.database.getDynamicGlobalProperties().then(data => {
+      resolve({
+        totalVestingShares: parseFloat(data.total_vesting_shares),
+        totalVestingFundHive: parseFloat(data.total_vesting_fund_hive),
+      });
+    }).catch(reject);
   });
 }
 
-function getTotalDelegatedHP(periods) {
-  return periods.reduce((sum, d) => sum + d.amount, 0);
+function getCurationRewards(account, startTime) {
+  return new Promise((resolve, reject) => {
+    const rewards = [];
+    const fetchOps = async (start = -1) => {
+      try {
+        const history = await client.call('account_history_api', 'get_account_history', {
+          account,
+          start,
+          limit: 1000,
+          include_reversible: false,
+          operation_filter_low: 0,
+          operation_filter_high: 1000,
+        });
+        const entries = history.history;
+
+        for (let [_, op] of entries.reverse()) {
+          if (op.op[0] === 'curation_reward') {
+            const timestamp = new Date(op.timestamp + 'Z').getTime() / 1000;
+            if (timestamp >= startTime) {
+              rewards.push(op.op[1]);
+            }
+          }
+        }
+        resolve(rewards);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    fetchOps();
+  });
 }
 
-function getDelegatorShares(periods, totalDelegated) {
-  const shares = {};
-  for (const { delegator, amount } of periods) {
-    shares[delegator] = (amount / totalDelegated);
-  }
-  return shares;
+function getDelegations(db, timestamp) {
+  return new Promise((resolve, reject) => {
+    const delegations = {};
+    db.each(
+      `SELECT delegator, amount FROM delegation_periods WHERE start_time <= ?`,
+      [timestamp],
+      (err, row) => {
+        if (err) reject(err);
+        else {
+          if (!delegations[row.delegator]) {
+            delegations[row.delegator] = 0;
+          }
+          delegations[row.delegator] += row.amount;
+        }
+      },
+      (err, count) => {
+        if (err) reject(err);
+        else resolve(delegations);
+      }
+    );
+  });
 }
 
-function logPayout(delegator, amount, dateStr) {
-  const logLine = `${new Date().toISOString()} Paid ${amount.toFixed(6)} HIVE to @${delegator} for ${dateStr}\n`;
-  fs.appendFileSync(PAYOUT_LOG_PATH, logLine);
+function logBreakdown(content) {
+  fs.appendFileSync(breakdownLogPath, content + '\n');
 }
 
-function logCurationBreakdown(dateStr, totalCuration, rewards) {
-  const lines = [`# Curation Breakdown for ${dateStr}`, `Total 1-day curation: ${totalCuration.toFixed(6)} HIVE`, `Total 95%: ${(totalCuration * REWARD_PERCENT).toFixed(6)} HIVE`, ''];
-  for (const { delegator, payout } of rewards) {
-    lines.push(`@${delegator}: ${payout.toFixed(6)} HIVE`);
-  }
-  lines.push('');
-  fs.appendFileSync(CURATION_LOG_PATH, lines.join('\n') + '\n');
+function logPayout(content) {
+  fs.appendFileSync(payoutLogPath, content + '\n');
 }
 
-async function distributeRewards() {
-  const { amount: totalCuration, startTime, endTime } = await getCurationRewards();
-  const rewardAmount = totalCuration * REWARD_PERCENT;
-  const dateStr = startTime.toISOString().slice(0, 10);
+function recordRewardedDay(db, dateKey) {
+  db.run(`INSERT OR IGNORE INTO rewarded_days(date_key) VALUES (?)`, [dateKey]);
+}
 
-  const periods = await getDelegationPeriods(dateStr);
-  const totalDelegated = getTotalDelegatedHP(periods);
-  const shares = getDelegatorShares(periods, totalDelegated);
+(async () => {
+  const startTime = getStartOfDayTimestamp();
+  const todayKey = new Date(startTime * 1000).toISOString().substring(0, 10);
 
-  const rewards = [];
-  for (const delegator in shares) {
-    const payout = shares[delegator] * rewardAmount;
-    if (payout >= 0.001) {
-      console.log(`🚫 Simulated payment to @${delegator}: ${payout.toFixed(6)} HIVE`);
-      logPayout(delegator, payout, dateStr);
-      rewards.push({ delegator, payout });
+  const db = new sqlite3.Database(DB_PATH);
+
+  db.get(`SELECT 1 FROM rewarded_days WHERE date_key = ?`, [todayKey], async (err, row) => {
+    if (row) {
+      console.log('⏭️ Rewards already distributed for today.');
+      db.close();
+      return;
     }
-  }
 
-  logCurationBreakdown(dateStr, totalCuration, rewards);
-}
+    const delegations = await getDelegations(db, startTime);
+    const totalDelegatedHP = Object.values(delegations).reduce((a, b) => a + b, 0);
+    if (totalDelegatedHP === 0) {
+      console.log('🚫 No eligible delegations.');
+      db.close();
+      return;
+    }
 
-distributeRewards().catch(console.error);
+    const { totalVestingShares, totalVestingFundHive } = await getGlobalProps();
+
+    const rewards = await getCurationRewards(process.env.REWARDS_ACCOUNT, startTime);
+    const totalRewardVests = rewards.reduce((sum, r) => sum + parseFloat(r.reward), 0);
+    const totalHP = vestsToHP(totalRewardVests, totalVestingShares, totalVestingFundHive);
+    const distributable = totalHP * 0.95;
+
+    logBreakdown(`=== ${todayKey} ===`);
+    logBreakdown(`Total HP: ${totalHP.toFixed(6)}, 95% Distributed: ${distributable.toFixed(6)}`);
+
+    for (let delegator in delegations) {
+      const share = delegations[delegator] / totalDelegatedHP;
+      const payout = distributable * share;
+      console.log(`🚫 Simulated payment to @${delegator}: ${payout.toFixed(6)} HIVE`);
+      logPayout(`${todayKey}: Simulated ${payout.toFixed(6)} HIVE to @${delegator}`);
+    }
+
+    recordRewardedDay(db, todayKey);
+    db.close();
+  });
+})();
