@@ -1,147 +1,78 @@
-// payout.js (Testing version — no real payouts)
-
 require('dotenv').config();
 const fs = require('fs');
-const path = require('path');
-const { Client } = require('hive-js');
-const sqlite3 = require('sqlite3').verbose();
+const { Client } = require('@hiveio/hive-js');
+const client = Client;
+const ACCOUNT = process.env.HIVE_ACCOUNT;
+const PRIVATE_KEY = process.env.HIVE_ACTIVE_KEY;
+const LOG_FILE = 'payout.log';
+const CURATION_LOG_FILE = 'curation_breakdown.log';
 
-const client = new Client(process.env.HIVE_API || 'https://api.hive.blog');
+const rewards = JSON.parse(fs.readFileSync('rewards.json'));
+const delegations = JSON.parse(fs.readFileSync('delegations.json'));
+const paidOut = JSON.parse(fs.readFileSync('paid_out.json'));
 
-const DB_PATH = './data/hive_rewards.db';
-const breakdownLogPath = path.join(__dirname, '../ui/curation_breakdown.log');
-const payoutLogPath = path.join(__dirname, '../ui/payout.log');
+const now = new Date();
+const nowTime = now.toLocaleString();
 
-function getStartOfDayTimestamp() {
-  const now = new Date();
-  if (now.getHours() < 8) {
-    now.setDate(now.getDate() - 1);
+function log(message) {
+  console.log(message);
+  fs.appendFileSync(LOG_FILE, `[${nowTime}] ${message}\n`);
+}
+
+function logCurationBreakdown(message) {
+  fs.appendFileSync(CURATION_LOG_FILE, `[${nowTime}] ${message}\n`);
+}
+
+function simulateTransfer(to, amount, memo) {
+  console.log(`🚫 Simulated payment to @${to}: ${amount.toFixed(6)} HIVE | Memo: "${memo}"`);
+  log(`Simulated payout of ${amount.toFixed(6)} HIVE to @${to}`);
+}
+
+function daysSince(dateString) {
+  const then = new Date(dateString);
+  return Math.floor((Date.now() - then.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function payoutDelegators() {
+  const totalReward = parseFloat(rewards.total_curation_reward || 0);
+  const distributable = totalReward * 0.95;
+  const keepAmount = totalReward * 0.05;
+
+  log(`Total reward: ${totalReward} HIVE | To distribute: ${distributable.toFixed(6)} HIVE | Retained: ${keepAmount.toFixed(6)} HIVE`);
+
+  let totalDelegation = 0;
+  for (const [user, delegs] of Object.entries(delegations)) {
+    for (const d of delegs) {
+      if (daysSince(d.since) >= 7) {
+        totalDelegation += d.amount;
+      }
+    }
   }
-  now.setHours(8, 0, 0, 0);
-  return Math.floor(now.getTime() / 1000);
-}
 
-function vestsToHP(vests, totalVestingShares, totalVestingFundHive) {
-  return parseFloat(vests) * totalVestingFundHive / totalVestingShares;
-}
+  log(`Total matured delegation: ${totalDelegation} HP`);
 
-function getGlobalProps() {
-  return new Promise((resolve, reject) => {
-    client.database.getDynamicGlobalProperties().then(data => {
-      resolve({
-        totalVestingShares: parseFloat(data.total_vesting_shares),
-        totalVestingFundHive: parseFloat(data.total_vesting_fund_hive),
-      });
-    }).catch(reject);
-  });
-}
-
-function getCurationRewards(account, startTime) {
-  return new Promise((resolve, reject) => {
-    const rewards = [];
-    const fetchOps = async (start = -1) => {
-      try {
-        const history = await client.call('account_history_api', 'get_account_history', {
-          account,
-          start,
-          limit: 1000,
-          include_reversible: false,
-          operation_filter_low: 0,
-          operation_filter_high: 1000,
-        });
-        const entries = history.history;
-
-        for (let [_, op] of entries.reverse()) {
-          if (op.op[0] === 'curation_reward') {
-            const timestamp = new Date(op.timestamp + 'Z').getTime() / 1000;
-            if (timestamp >= startTime) {
-              rewards.push(op.op[1]);
-            }
-          }
-        }
-        resolve(rewards);
-      } catch (e) {
-        reject(e);
+  for (const [user, delegs] of Object.entries(delegations)) {
+    let userMaturedHP = 0;
+    for (const d of delegs) {
+      if (daysSince(d.since) >= 7) {
+        userMaturedHP += d.amount;
       }
-    };
-    fetchOps();
-  });
-}
-
-function getDelegations(db, timestamp) {
-  return new Promise((resolve, reject) => {
-    const delegations = {};
-    db.each(
-      `SELECT delegator, amount FROM delegation_periods WHERE start_time <= ?`,
-      [timestamp],
-      (err, row) => {
-        if (err) reject(err);
-        else {
-          if (!delegations[row.delegator]) {
-            delegations[row.delegator] = 0;
-          }
-          delegations[row.delegator] += row.amount;
-        }
-      },
-      (err, count) => {
-        if (err) reject(err);
-        else resolve(delegations);
-      }
-    );
-  });
-}
-
-function logBreakdown(content) {
-  fs.appendFileSync(breakdownLogPath, content + '\n');
-}
-
-function logPayout(content) {
-  fs.appendFileSync(payoutLogPath, content + '\n');
-}
-
-function recordRewardedDay(db, dateKey) {
-  db.run(`INSERT OR IGNORE INTO rewarded_days(date_key) VALUES (?)`, [dateKey]);
-}
-
-(async () => {
-  const startTime = getStartOfDayTimestamp();
-  const todayKey = new Date(startTime * 1000).toISOString().substring(0, 10);
-
-  const db = new sqlite3.Database(DB_PATH);
-
-  db.get(`SELECT 1 FROM rewarded_days WHERE date_key = ?`, [todayKey], async (err, row) => {
-    if (row) {
-      console.log('⏭️ Rewards already distributed for today.');
-      db.close();
-      return;
     }
 
-    const delegations = await getDelegations(db, startTime);
-    const totalDelegatedHP = Object.values(delegations).reduce((a, b) => a + b, 0);
-    if (totalDelegatedHP === 0) {
-      console.log('🚫 No eligible delegations.');
-      db.close();
-      return;
+    if (userMaturedHP === 0) continue;
+
+    const payout = (userMaturedHP / totalDelegation) * distributable;
+
+    if (payout >= 0.001) {
+      const memo = `Curation reward for ${now.toISOString().split('T')[0]} based on ${userMaturedHP} HP`;
+      simulateTransfer(user, payout, memo);
+      if (!paidOut[user]) paidOut[user] = 0;
+      paidOut[user] += payout;
+      logCurationBreakdown(`@${user} — Delegated: ${userMaturedHP} HP — Payout: ${payout.toFixed(6)} HIVE`);
     }
+  }
 
-    const { totalVestingShares, totalVestingFundHive } = await getGlobalProps();
+  fs.writeFileSync('paid_out.json', JSON.stringify(paidOut, null, 2));
+}
 
-    const rewards = await getCurationRewards(process.env.REWARDS_ACCOUNT, startTime);
-    const totalRewardVests = rewards.reduce((sum, r) => sum + parseFloat(r.reward), 0);
-    const totalHP = vestsToHP(totalRewardVests, totalVestingShares, totalVestingFundHive);
-    const distributable = totalHP * 0.95;
-
-    logBreakdown(`=== ${todayKey} ===`);
-    logBreakdown(`Total HP: ${totalHP.toFixed(6)}, 95% Distributed: ${distributable.toFixed(6)}`);
-
-    for (let delegator in delegations) {
-      const share = delegations[delegator] / totalDelegatedHP;
-      const payout = distributable * share;
-      console.log(`🚫 Simulated payment to @${delegator}: ${payout.toFixed(6)} HIVE`);
-      logPayout(`${todayKey}: Simulated ${payout.toFixed(6)} HIVE to @${delegator}`);
-    }
-
-    recordRewardedDay(db, todayKey);
-    db.close();
-  });
-})();
+payoutDelegators();
