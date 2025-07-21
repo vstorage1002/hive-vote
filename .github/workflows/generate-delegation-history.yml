@@ -6,6 +6,7 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,7 +20,9 @@ jobs:
         run: npm install dotenv @hiveio/hive-js
 
       - name: Generate delegation_history.json
+        env:
+          ACCOUNT: ${{ secrets.HIVE_USER }}  # Use this if your secret is HIVE_USER
         run: node scripts/generate_delegation_history.js
 
       - name: Show output
-        run: cat delegation_history.json
+        run: cat scripts/delegation_history.json
