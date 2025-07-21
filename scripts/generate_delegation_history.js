@@ -3,7 +3,7 @@ const fs = require('fs');
 const hive = require('@hiveio/hive-js');
 
 const OUTPUT_FILE = 'scripts/delegation_history.json';
-const TARGET_ACCOUNT = process.env.ACCOUNT;
+const TARGET_ACCOUNT = process.env.HIVE_USER;
 const TEST_TIMESTAMP = '2025-07-05T00:00:00Z';
 
 async function main() {
