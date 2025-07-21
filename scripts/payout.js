@@ -1,73 +1,103 @@
+// payout.js (adjusted for safe testing)
+
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const hive = require('@hiveio/hive-js');
-require('dotenv').config();
+const { Client } = require('@hiveio/dhive');
+const sqlite3 = require('sqlite3').verbose();
 
-const {
-  convertVestsToHive,
-  getCurationRewards,
-  getCurrentDelegations,
-  getDelegationPeriods,
-  getDelegatorShares,
-  getTotalDelegatedHP,
-} = require('./utils');
+const client = new Client(['https://api.hive.blog']);
+const ACCOUNT = process.env.HIVE_ACCOUNT;
+const REWARD_PERCENT = 0.95;
 
-const DB_PATH = './scripts/database.sqlite';
-const REWARD_CACHE_PATH = './ui/reward_cache.json';
-const PAYOUT_LOG_PATH = './ui/payout.log';
-const CURATION_LOG_PATH = './ui/curation_breakdown.log';
+const db = new sqlite3.Database('payouts.db');
+const CURATION_LOG_PATH = path.join(__dirname, '../ui/curation_breakdown.log');
+const PAYOUT_LOG_PATH = path.join(__dirname, '../ui/payout.log');
 
-const HIVE_USER = process.env.HIVE_USER;
+function convertVestsToHive(vests, totalVestingShares, totalVestingFundHive) {
+  return (parseFloat(totalVestingFundHive) * parseFloat(vests)) / parseFloat(totalVestingShares);
+}
+
+async function getCurationRewards() {
+  const now = new Date();
+  const endTime = new Date(now);
+  endTime.setHours(8, 0, 0, 0);
+  if (now < endTime) endTime.setDate(endTime.getDate() - 1);
+  const startTime = new Date(endTime);
+  startTime.setDate(startTime.getDate() - 1);
+
+  const history = await client.database.call('get_account_history', [ACCOUNT, -1, 1000]);
+  const vestingInfo = await client.database.getDynamicGlobalProperties();
+
+  let totalCuration = 0;
+  for (const [, op] of history.reverse()) {
+    const [type, data] = op.op;
+    if (type === 'curation_reward') {
+      const timestamp = new Date(op.timestamp + 'Z');
+      if (timestamp >= startTime && timestamp < endTime) {
+        const hive = convertVestsToHive(data.reward, vestingInfo.total_vesting_shares, vestingInfo.total_vesting_fund_hive);
+        totalCuration += hive;
+      }
+    }
+  }
+  return { amount: totalCuration, startTime, endTime };
+}
+
+function getDelegationPeriods(dateStr) {
+  return new Promise((resolve, reject) => {
+    db.all('SELECT delegator, amount FROM delegation_periods WHERE start_date <= ? AND (end_date IS NULL OR end_date >= ?)', [dateStr, dateStr], (err, rows) => {
+      if (err) return reject(err);
+      resolve(rows);
+    });
+  });
+}
+
+function getTotalDelegatedHP(periods) {
+  return periods.reduce((sum, d) => sum + d.amount, 0);
+}
+
+function getDelegatorShares(periods, totalDelegated) {
+  const shares = {};
+  for (const { delegator, amount } of periods) {
+    shares[delegator] = (amount / totalDelegated);
+  }
+  return shares;
+}
+
+function logPayout(delegator, amount, dateStr) {
+  const logLine = `${new Date().toISOString()} Paid ${amount.toFixed(6)} HIVE to @${delegator} for ${dateStr}\n`;
+  fs.appendFileSync(PAYOUT_LOG_PATH, logLine);
+}
+
+function logCurationBreakdown(dateStr, totalCuration, rewards) {
+  const lines = [`# Curation Breakdown for ${dateStr}`, `Total 1-day curation: ${totalCuration.toFixed(6)} HIVE`, `Total 95%: ${(totalCuration * REWARD_PERCENT).toFixed(6)} HIVE`, ''];
+  for (const { delegator, payout } of rewards) {
+    lines.push(`@${delegator}: ${payout.toFixed(6)} HIVE`);
+  }
+  lines.push('');
+  fs.appendFileSync(CURATION_LOG_PATH, lines.join('\n') + '\n');
+}
 
 async function distributeRewards() {
-  const rewards = await getCurationRewards(HIVE_USER);
-  const totalRewards = convertVestsToHive(rewards.totalVests);
-  const rewardDate = rewards.rewardDate;
+  const { amount: totalCuration, startTime, endTime } = await getCurationRewards();
+  const rewardAmount = totalCuration * REWARD_PERCENT;
+  const dateStr = startTime.toISOString().slice(0, 10);
 
-  const startTime = new Date();
-  const dateStr = rewardDate.toISOString().split('T')[0];
+  const periods = await getDelegationPeriods(dateStr);
+  const totalDelegated = getTotalDelegatedHP(periods);
+  const shares = getDelegatorShares(periods, totalDelegated);
 
-  const periods = await getDelegationPeriods(DB_PATH);
-  const delegations = await getCurrentDelegations(HIVE_USER);
-  const eligibleShares = getDelegatorShares(periods, delegations, rewardDate);
-  const totalEligibleHP = getTotalDelegatedHP(eligibleShares);
-
-  const distribution = {};
-  const breakdownLines = [];
-
-  for (const [delegator, hp] of Object.entries(eligibleShares)) {
-    const share = hp / totalEligibleHP;
-    const payout = totalRewards * 0.95 * share;
-    distribution[delegator] = payout;
-
-    breakdownLines.push(
-      `${dateStr} | ${delegator.padEnd(20)} | HP: ${hp.toFixed(3).padStart(8)} | Share: ${(share * 100).toFixed(2)}% | Reward: ${payout.toFixed(6)} HIVE`
-    );
+  const rewards = [];
+  for (const delegator in shares) {
+    const payout = shares[delegator] * rewardAmount;
+    if (payout >= 0.001) {
+      console.log(`🚫 Simulated payment to @${delegator}: ${payout.toFixed(6)} HIVE`);
+      logPayout(delegator, payout, dateStr);
+      rewards.push({ delegator, payout });
+    }
   }
 
-  // Log breakdown
-  fs.appendFileSync(CURATION_LOG_PATH, breakdownLines.join('\n') + '\n');
-
-  // Save reward cache
-  fs.writeFileSync(REWARD_CACHE_PATH, JSON.stringify({
-    rewardDate: rewardDate.toISOString(),
-    totalRewards,
-    distributed: distribution
-  }, null, 2));
-
-  // Simulate payouts (no real HIVE sent)
-  const payoutLines = [];
-  for (const [delegator, payout] of Object.entries(distribution)) {
-    const line = `🚫 Simulated payment: ${payout.toFixed(6)} HIVE to ${delegator}`;
-    console.log(line);
-    payoutLines.push(`${dateStr} ${line}`);
-  }
-
-  // Save simulated payout log
-  fs.appendFileSync(PAYOUT_LOG_PATH, payoutLines.join('\n') + '\n');
-
-  const endTime = new Date();
-  console.log(`✅ Payout simulation complete in ${((endTime - startTime) / 1000).toFixed(2)} seconds.`);
+  logCurationBreakdown(dateStr, totalCuration, rewards);
 }
 
 distributeRewards().catch(console.error);
