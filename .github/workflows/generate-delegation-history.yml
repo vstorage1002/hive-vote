@@ -1,0 +1,25 @@
+name: Generate Delegation History
+
+on:
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install Dependencies
+        run: npm install dotenv @hiveio/hive-js
+
+      - name: Generate delegation_history.json
+        run: node scripts/generate_delegation_history.js
+
+      - name: Show output
+        run: cat delegation_history.json
