@@ -18,7 +18,8 @@ function logToFile(file, content) {
 function loadJSON(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath));
-  } catch {
+  } catch (error) {
+    console.error(`Error loading file ${filePath}:`, error);
     return {};
   }
 }
@@ -68,7 +69,16 @@ function main() {
   const history = loadDelegationHistory();
   const todayKey = getTodayKey();
 
+  console.log('Loaded rewards:', rewards);
+  console.log('Loaded delegation history:', history);
+
   const todayReward = rewards[todayKey]?.curation_reward || 0;
+  console.log(`Today's curation reward: ${todayReward.toFixed(6)}`);
+  
+  if (todayReward === 0) {
+    console.log('⚠️ No curation reward found for today.');
+  }
+
   const totalReward = todayReward * 0.95;
   const breakdown = [];
 
@@ -84,6 +94,9 @@ function main() {
       totalEligibleHP += eligibleHP;
     }
   }
+
+  console.log('Delegator Eligible HP:', delegatorEligibleHP);
+  console.log('Total Eligible HP:', totalEligibleHP);
 
   for (const [delegator, hp] of Object.entries(delegatorEligibleHP)) {
     const payout = calculateCurationPortion(totalReward, hp, totalEligibleHP);
