@@ -1,85 +1,103 @@
+// payout.js (Adjusted for testing only)
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const hive = require('hive-js');
 
-// Constants based on your code
 const REWARD_CACHE_FILE = 'ui/reward_cache.json';
-const DELEGATION_FILE = 'delegations.json';
 const PAYOUT_LOG_FILE = 'ui/payout.log';
 const CURATION_LOG_FILE = 'ui/curation_breakdown.log';
-const PAID_OUT_FILE = 'paid_out.json';
+const DELEGATION_HISTORY_FILE = 'delegation_history.json';
 const MIN_PAYOUT = 0.001;
-
-// Read JSON data
-const rewards = JSON.parse(fs.readFileSync(REWARD_CACHE_FILE));
-const delegations = JSON.parse(fs.readFileSync(DELEGATION_FILE));
-const paidOut = fs.existsSync(PAID_OUT_FILE) ? JSON.parse(fs.readFileSync(PAID_OUT_FILE)) : {};
-
 const now = new Date();
-const nowTime = now.toLocaleString();
 
-// Logger functions
-function log(message) {
-  console.log(message);
-  fs.appendFileSync(PAYOUT_LOG_FILE, `[${nowTime}] ${message}\n`);
+function logToFile(file, content) {
+  fs.appendFileSync(file, `${content}\n`, 'utf8');
 }
 
-function logCurationBreakdown(message) {
-  fs.appendFileSync(CURATION_LOG_FILE, `[${nowTime}] ${message}\n`);
+function loadJSON(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath));
+  } catch {
+    return {};
+  }
 }
 
-// Simulated payout (no actual Hive transfer)
-function simulateTransfer(to, amount, memo) {
-  console.log(`🚫 Simulated payment to @${to}: ${amount.toFixed(6)} HIVE | Memo: "${memo}"`);
-  log(`Simulated payout of ${amount.toFixed(6)} HIVE to @${to}`);
+function saveJSON(filePath, data) {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
-// Helper
-function daysSince(dateString) {
-  const then = new Date(dateString);
-  return Math.floor((Date.now() - then.getTime()) / (1000 * 60 * 60 * 24));
+function loadRewardCache() {
+  return loadJSON(REWARD_CACHE_FILE);
 }
 
-function payoutDelegators() {
-  const totalReward = parseFloat(rewards.total_curation_reward || 0);
-  const distributable = totalReward * 0.95;
-  const keepAmount = totalReward * 0.05;
+function loadDelegationHistory() {
+  return loadJSON(DELEGATION_HISTORY_FILE);
+}
 
-  log(`Total reward: ${totalReward} HIVE | To distribute: ${distributable.toFixed(6)} HIVE | Retained: ${keepAmount.toFixed(6)} HIVE`);
+function getTodayKey() {
+  const today = new Date(now.getTime() - (8 * 60 * 60 * 1000)); // offset for 8:00 AM
+  today.setUTCHours(8, 0, 0, 0);
+  return today.toISOString().split('T')[0];
+}
 
-  let totalDelegation = 0;
-  for (const [user, delegs] of Object.entries(delegations)) {
-    for (const d of delegs) {
-      if (daysSince(d.since) >= 7) {
-        totalDelegation += d.amount;
-      }
+function simulateSendPayout(username, amount, memo) {
+  console.log(`[TEST] Would send ${amount.toFixed(6)} HIVE to @${username} | Memo: ${memo}`);
+  logToFile(PAYOUT_LOG_FILE, `[${now.toISOString()}] TEST payout: ${amount.toFixed(6)} HIVE to @${username}`);
+}
+
+function calculateCurationPortion(totalReward, delegatorHP, totalHP) {
+  return totalReward * (delegatorHP / totalHP);
+}
+
+function isMature(delegationDate) {
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+  return now - new Date(delegationDate) >= sevenDays;
+}
+
+function getEligibleDelegationAmount(history) {
+  let eligible = 0;
+  for (const h of history) {
+    if (isMature(h.timestamp)) eligible += h.amount;
+  }
+  return eligible;
+}
+
+function main() {
+  const rewards = loadRewardCache();
+  const history = loadDelegationHistory();
+  const todayKey = getTodayKey();
+
+  const todayReward = rewards[todayKey]?.curation_reward || 0;
+  const totalReward = todayReward * 0.95;
+  const breakdown = [];
+
+  console.log(`Total curation reward to distribute (95%): ${totalReward.toFixed(6)} HIVE`);
+
+  const delegatorEligibleHP = {};
+  let totalEligibleHP = 0;
+
+  for (const [delegator, entries] of Object.entries(history)) {
+    const eligibleHP = getEligibleDelegationAmount(entries);
+    if (eligibleHP > 0) {
+      delegatorEligibleHP[delegator] = eligibleHP;
+      totalEligibleHP += eligibleHP;
     }
   }
 
-  log(`Total matured delegation: ${totalDelegation} HP`);
-
-  for (const [user, delegs] of Object.entries(delegations)) {
-    let userMaturedHP = 0;
-    for (const d of delegs) {
-      if (daysSince(d.since) >= 7) {
-        userMaturedHP += d.amount;
-      }
-    }
-
-    if (userMaturedHP === 0) continue;
-
-    const payout = (userMaturedHP / totalDelegation) * distributable;
-
+  for (const [delegator, hp] of Object.entries(delegatorEligibleHP)) {
+    const payout = calculateCurationPortion(totalReward, hp, totalEligibleHP);
     if (payout >= MIN_PAYOUT) {
-      const memo = `Curation reward for ${now.toISOString().split('T')[0]} based on ${userMaturedHP} HP`;
-      simulateTransfer(user, payout, memo);
-      if (!paidOut[user]) paidOut[user] = 0;
-      paidOut[user] += payout;
-      logCurationBreakdown(`@${user} — Delegated: ${userMaturedHP} HP — Payout: ${payout.toFixed(6)} HIVE`);
+      simulateSendPayout(delegator, payout, `Curation reward for ${todayKey}`);
+      breakdown.push(`${delegator}: ${payout.toFixed(6)} HIVE for ${hp} HP`);
+    } else {
+      console.log(`[SKIP] ${delegator} payout ${payout.toFixed(6)} < ${MIN_PAYOUT}`);
     }
   }
 
-  fs.writeFileSync(PAID_OUT_FILE, JSON.stringify(paidOut, null, 2));
+  if (breakdown.length > 0) {
+    logToFile(CURATION_LOG_FILE, `[${todayKey}]\n` + breakdown.join('\n'));
+  }
 }
 
-payoutDelegators();
+main();
