@@ -2,76 +2,72 @@ const fs = require("fs");
 const dhive = require("@hiveio/hive-js");
 require("dotenv").config();
 
-const ACCOUNT = process.env.HIVE_USER || "bayanihive";
+const ACCOUNT = process.env.HIVE_USER || "youraccount";
 const HISTORY_FILE = "scripts/delegation_history.json";
 const now = new Date().toISOString();
+
+async function vestsToHP(vests) {
+  const globals = await dhive.api.getDynamicGlobalPropertiesAsync();
+  const totalVestingShares = parseFloat(globals.total_vesting_shares);
+  const totalVestingFundHive = parseFloat(globals.total_vesting_fund_hive);
+  return vests * totalVestingFundHive / totalVestingShares;
+}
 
 (async () => {
   try {
     console.log(`🔍 Scanning all delegations TO @${ACCOUNT}...`);
+    const delegators = {};
+    let start = "";
+    const limit = 100;
 
-    // Get list of all accounts (or optimize with a known list)
-    let accountsList = await dhive.api.lookupAccountsAsync("", 1000);
-    let allDelegators = [];
+    while (true) {
+      const delegations = await dhive.api.getVestingDelegationsAsync(start, ACCOUNT, limit);
+      if (delegations.length === 0) break;
 
-    for (let i = 0; i < accountsList.length; i += 100) {
-      const chunk = accountsList.slice(i, i + 100);
-      const accounts = await dhive.api.getAccountsAsync(chunk);
+      for (const d of delegations) {
+        if (d.delegatee === ACCOUNT) {
+          const delegator = d.delegator;
+          const amount = parseFloat(d.vesting_shares.split(" ")[0]);
+          const hp = await vestsToHP(amount);
+          if (!delegators[delegator]) delegators[delegator] = [];
+          delegators[delegator].push({ amount: parseFloat(hp.toFixed(3)), timestamp: now });
+        }
+      }
 
-      for (const acc of accounts) {
-        const vesting = acc.delegated_vesting_shares;
-        const hasDelegated = acc.vesting_delegations?.some(d => d.delegatee === ACCOUNT);
+      if (delegations.length < limit) break;
+      start = delegations[delegations.length - 1].delegator;
+    }
 
-        if (vesting && parseFloat(vesting.split(" ")[0]) > 0 && hasDelegated) {
-          allDelegators.push(acc);
+    let existing = {};
+    if (fs.existsSync(HISTORY_FILE)) {
+      existing = JSON.parse(fs.readFileSync(HISTORY_FILE));
+    }
+
+    let updated = false;
+    for (const [name, records] of Object.entries(delegators)) {
+      if (!existing[name]) {
+        existing[name] = records;
+        updated = true;
+      } else {
+        for (const record of records) {
+          const duplicate = existing[name].some(r => Math.abs(r.amount - record.amount) < 0.001);
+          if (!duplicate) {
+            existing[name].push(record);
+            updated = true;
+          }
         }
       }
     }
 
-    let history = {};
-    if (fs.existsSync(HISTORY_FILE)) {
-      try {
-        history = JSON.parse(fs.readFileSync(HISTORY_FILE));
-      } catch (err) {
-        console.error("❌ Error reading existing file:", err.message);
-      }
-    }
-
-    let changed = false;
-
-    for (const acc of allDelegators) {
-      const vests = parseFloat(acc.delegated_vesting_shares.split(" ")[0]);
-      const hp = await vestsToHP(vests);
-
-      if (!history[acc.name]) {
-        history[acc.name] = [];
-      }
-
-      const alreadyRecorded = history[acc.name].some(entry => Math.abs(entry.amount - hp) < 0.001);
-
-      if (!alreadyRecorded) {
-        history[acc.name].push({ amount: parseFloat(hp.toFixed(3)), timestamp: now });
-        console.log(`➕ Delegation from @${acc.name}: ${hp.toFixed(3)} HP`);
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
-      console.log(`✅ delegation_history.json updated.`);
+    if (updated) {
+      fs.writeFileSync(HISTORY_FILE, JSON.stringify(existing, null, 2));
+      console.log("✅ delegation_history.json updated.");
     } else {
       console.log("🟡 No new delegations found. File untouched.");
     }
 
   } catch (err) {
-    console.error("❌ Error:", err.message || err);
+    console.error("❌ Error:", err.message);
     process.exit(1);
   }
 })();
-
-async function vestsToHP(vests) {
-  const globals = await dhive.api.getDynamicGlobalPropertiesAsync();
-  const totalVestingShares = parseFloat(globals.total_vesting_shares.split(" ")[0]);
-  const totalVestingFundHive = parseFloat(globals.total_vesting_fund_hive.split(" ")[0]);
-  return vests * totalVestingFundHive / totalVestingShares;
-}
