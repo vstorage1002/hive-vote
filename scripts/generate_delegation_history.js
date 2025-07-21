@@ -2,7 +2,7 @@ const fs = require("fs");
 const dhive = require("@hiveio/hive-js");
 require("dotenv").config();
 
-const ACCOUNT = process.env.HIVE_USER || "bayanihive";
+const ACCOUNT = process.env.HIVE_USER || 'bayanihive';
 const HISTORY_FILE = "scripts/delegation_history.json";
 const now = new Date().toISOString();
 
