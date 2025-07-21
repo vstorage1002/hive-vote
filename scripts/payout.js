@@ -9,6 +9,7 @@ const DELEGATION_WEBHOOK_URL = process.env.DELEGATION_WEBHOOK_URL;
 
 const REWARD_CACHE_FILE = 'ui/reward_cache.json';
 const PAYOUT_LOG_FILE = 'ui/payout.log';
+const CURATION_LOG_FILE = 'ui/curation_breakdown.log';  // 🔹 New
 const DELEGATION_HISTORY_FILE = 'delegation_history.json';
 const MIN_PAYOUT = 0.001;
 
@@ -130,6 +131,7 @@ async function fetchFullDelegationHistory() {
   return result;
 }
 
+// 🔹 Updated to return detailed rewards
 async function getCurationRewards() {
   const now = new Date();
   const phTz = 'Asia/Manila';
@@ -144,16 +146,22 @@ async function getCurationRewards() {
     });
   });
 
-  let totalVests = 0;
+  const rewards = [];
   for (const [, op] of history) {
     if (op.op[0] === 'curation_reward') {
+      const { reward, comment_author, comment_permlink } = op.op[1];
       const opTime = new Date(op.timestamp + 'Z').getTime();
       if (opTime >= fromTime && opTime < today8AM.getTime()) {
-        totalVests += parseFloat(op.op[1].reward);
+        rewards.push({
+          vests: parseFloat(reward),
+          author: comment_author,
+          permlink: comment_permlink,
+          timestamp: op.timestamp
+        });
       }
     }
   }
-  return totalVests;
+  return rewards;
 }
 
 async function getDynamicProps() {
@@ -204,31 +212,45 @@ function saveRewardCache(cache) {
   fs.writeFileSync(REWARD_CACHE_FILE, JSON.stringify(cache, null, 2));
 }
 
+// ✅ We keep your payout log as-is
 function logPayout(dateStr, totalHive) {
   const line = `${dateStr} - ✅ Payout done: ${totalHive.toFixed(6)} HIVE\n`;
   fs.appendFileSync(PAYOUT_LOG_FILE, line);
 }
 
+// 🔹 Updated distributeRewards to include breakup logging
 async function distributeRewards() {
   console.log(`🚀 Calculating rewards for @${HIVE_USER}...`);
   await pickWorkingNode();
 
-  const [props, delegationChunks, totalVests] = await Promise.all([
+  const [props, delegationChunks, rewardDetails] = await Promise.all([
     getDynamicProps(),
     fetchFullDelegationHistory(),
     getCurationRewards()
   ]);
 
-  const totalVestingShares = parseFloat(props.total_vesting_shares);
-  const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive);
-
+  const totalVests = rewardDetails.reduce((sum, r) => sum + r.vests, 0);
   const totalCurationHive = vestsToHP(
     totalVests,
-    totalVestingFundHive,
-    totalVestingShares
+    parseFloat(props.total_vesting_fund_hive),
+    parseFloat(props.total_vesting_shares)
   );
 
   console.log(`📊 Total curation rewards in last 24h: ~${totalCurationHive.toFixed(6)} HIVE`);
+
+  // 📝 Log breakdown
+  let lines = [`\n🧮 ${new Date().toISOString()} — Total curation: ${totalCurationHive.toFixed(6)} HIVE`];
+  for (const r of rewardDetails) {
+    const earnedHive = vestsToHP(
+      r.vests,
+      parseFloat(props.total_vesting_fund_hive),
+      parseFloat(props.total_vesting_shares)
+    );
+    const msg = ` - ${r.timestamp} | @${r.author}/${r.permlink} => ${earnedHive.toFixed(6)} HIVE`;
+    console.log(msg);
+    lines.push(msg);
+  }
+  fs.appendFileSync(CURATION_LOG_FILE, lines.join('\n') + '\n');
 
   if (totalCurationHive < 0.000001 || Object.keys(delegationChunks).length === 0) {
     console.log('⚠️ Nothing to distribute.');
@@ -272,7 +294,7 @@ async function distributeRewards() {
 
   saveRewardCache(rewardCache);
   logPayout(new Date().toISOString(), totalCurationHive);
-  console.log(`🏁 Done. 95% distributed, 5% retained (~${retained.toFixed(6)} HIVE).`);
+  console.log(`🏁 Done. 95% distributed, 5% retained (~${(totalCurationHive*0.05).toFixed(6)} HIVE).`);
 }
 
 distributeRewards().catch(console.error);
