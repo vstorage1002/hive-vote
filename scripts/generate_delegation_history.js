@@ -1,90 +1,69 @@
-// scripts/generate_delegation_history.js
-require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
-const hive = require('@hiveio/hive-js');
+const fs = require("fs");
+const dhive = require("@hiveio/hive-js");
+require("dotenv").config();
 
-const ACCOUNT = 'bayanihive';
-const OUTPUT_FILE = path.join(__dirname, 'delegation_history.json');
-
-async function getDynamicProps() {
-  const props = await hive.api.getDynamicGlobalPropertiesAsync();
-  const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive);
-  const totalVestingShares = parseFloat(props.total_vesting_shares);
-  return (vests) => parseFloat(vests) * totalVestingFundHive / totalVestingShares;
-}
+const ACCOUNT = process.env.HIVE_USER || "bayanihive";
+const HISTORY_FILE = "scripts/delegation_history.json";
+const now = new Date().toISOString();
 
 (async () => {
-  const vestsToHP = await getDynamicProps();
+  try {
+    console.log(`🔍 Scanning all delegations TO @${ACCOUNT}...`);
 
-  let oldData = {};
-  if (fs.existsSync(OUTPUT_FILE)) {
-    try {
-      oldData = JSON.parse(fs.readFileSync(OUTPUT_FILE, 'utf8'));
-    } catch (e) {
-      console.warn('⚠️ Failed to parse existing delegation_history.json. Treating as empty.');
+    const result = await dhive.api.callAsync("condenser_api.get_vesting_delegations", [ACCOUNT, "", 1000]);
+
+    if (!result || result.length === 0) {
+      console.log("⚠️ No active delegations found.");
+      return;
     }
-  }
 
-  // Step 1: Get current delegators (live)
-  let currentDelegators = new Set();
-  let start = '';
-  let done = false;
+    // Load existing history file or create a blank one
+    let history = {};
+    if (fs.existsSync(HISTORY_FILE)) {
+      try {
+        history = JSON.parse(fs.readFileSync(HISTORY_FILE));
+      } catch (err) {
+        console.error("❌ Error reading delegation_history.json:", err.message);
+      }
+    }
 
-  console.log(`🔍 Scanning all delegations TO @${ACCOUNT}...`);
+    let changed = false;
 
-  while (!done) {
-    try {
-      const delegations = await hive.api.getVestingDelegationsAsync(ACCOUNT, start, 100);
-      if (delegations.length === 0) break;
+    for (const delegation of result) {
+      const from = delegation.delegator;
+      const amountVests = parseFloat(delegation.vesting_shares.split(" ")[0]);
+      const hp = await vestsToHP(amountVests);
 
-      for (const delegation of delegations) {
-        if (delegation.delegatee === ACCOUNT) {
-          currentDelegators.add(delegation.delegator);
-        }
+      if (!history[from]) {
+        history[from] = [];
       }
 
-      start = delegations[delegations.length - 1].delegator;
-      if (delegations.length < 100) done = true;
-    } catch (err) {
-      console.error('❌ Failed to fetch delegations:', err.message);
-      process.exit(1);
-    }
-  }
+      const existing = history[from];
+      const alreadyRecorded = existing.some(entry => Math.abs(entry.amount - hp) < 0.0001);
 
-  // Step 2: Union of historical and current delegators
-  const allDelegators = [...new Set([
-    ...Object.keys(oldData),
-    ...currentDelegators
-  ])];
-
-  let changed = false;
-
-  for (const user of allDelegators) {
-    try {
-      const userDelegations = await hive.api.getVestingDelegationsAsync(user, '', 100);
-      const entry = userDelegations.find(d => d.delegatee === ACCOUNT);
-      const hp = entry ? parseFloat(vestsToHP(entry.vesting_shares).toFixed(3)) : 0;
-
-      const previous = oldData[user] || [];
-      const latest = previous[previous.length - 1];
-
-      if (!latest || latest.amount !== hp) {
-        const timestamp = new Date().toISOString();
-        if (!oldData[user]) oldData[user] = [];
-        oldData[user].push({ amount: hp, timestamp });
+      if (!alreadyRecorded) {
+        history[from].push({ amount: parseFloat(hp.toFixed(3)), timestamp: now });
+        console.log(`➕ New delegation from @${from}: ${hp.toFixed(3)} HP`);
         changed = true;
-        console.log(`🔁 Updated delegation from @${user}: ${hp} HP`);
       }
-    } catch (err) {
-      console.warn(`⚠️ Error checking delegation from @${user}: ${err.message}`);
     }
-  }
 
-  if (changed) {
-    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(oldData, null, 2));
-    console.log(`✅ ${OUTPUT_FILE} updated with changes.`);
-  } else {
-    console.log('🟡 No changes in delegations. File left untouched.');
+    if (changed) {
+      fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
+      console.log(`✅ ${HISTORY_FILE} updated with ${Object.keys(history).length} delegators.`);
+    } else {
+      console.log("🟡 No changes in delegations. File left untouched.");
+    }
+
+  } catch (err) {
+    console.error("❌ Error:", err.message || err);
+    process.exit(1);
   }
 })();
+
+async function vestsToHP(vests) {
+  const globals = await dhive.api.getDynamicGlobalPropertiesAsync();
+  const totalVestingShares = parseFloat(globals.total_vesting_shares.split(" ")[0]);
+  const totalVestingFundHive = parseFloat(globals.total_vesting_fund_hive.split(" ")[0]);
+  return vests * totalVestingFundHive / totalVestingShares;
+}
