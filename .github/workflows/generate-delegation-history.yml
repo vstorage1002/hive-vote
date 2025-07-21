@@ -6,6 +6,8 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
+    env:
+      HIVE_USER: ${{ secrets.HIVE_USER }}  # ✅ Make sure this matches your GitHub Secrets
 
     steps:
       - name: Checkout
@@ -20,8 +22,6 @@ jobs:
         run: npm install dotenv @hiveio/hive-js
 
       - name: Generate delegation_history.json
-        env:
-          ACCOUNT: ${{ secrets.HIVE_USER }}  # Use this if your secret is HIVE_USER
         run: node scripts/generate_delegation_history.js
 
       - name: Show output
