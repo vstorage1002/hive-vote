@@ -4,49 +4,81 @@ const hive = require('@hiveio/hive-js');
 
 const OUTPUT_FILE = 'scripts/delegation_history.json';
 const TARGET_ACCOUNT = process.env.HIVE_USER;
-const TEST_TIMESTAMP = '2025-07-05T00:00:00Z';
 
-if (!TARGET_ACCOUNT) {
-  console.error('❌ HIVE_USER not defined in .env');
-  process.exit(1);
+async function getDynamicProps() {
+  const props = await hive.api.getDynamicGlobalPropertiesAsync();
+  const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive);
+  const totalVestingShares = parseFloat(props.total_vesting_shares);
+  return (vests) => parseFloat(vests) * totalVestingFundHive / totalVestingShares;
+}
+
+async function getFollowers(account) {
+  let start = '';
+  let followers = [];
+  let done = false;
+
+  while (!done) {
+    const chunk = await hive.api.getFollowersAsync(account, start, 'blog', 100);
+    if (chunk.length === 0) break;
+
+    followers.push(...chunk.map(f => f.follower));
+    start = chunk[chunk.length - 1].follower;
+    if (chunk.length < 100) done = true;
+  }
+
+  return [...new Set(followers)];
 }
 
 async function main() {
-  console.log(`🔍 Fetching all incoming delegations to @${TARGET_ACCOUNT}...`);
+  if (!TARGET_ACCOUNT) {
+    console.error('❌ HIVE_USER not defined in .env');
+    process.exit(1);
+  }
 
-  const dynamicProps = await hive.api.getDynamicGlobalPropertiesAsync();
-  const totalVestingFundHive = parseFloat(dynamicProps.total_vesting_fund_hive);
-  const totalVestingShares = parseFloat(dynamicProps.total_vesting_shares);
-  const vestsToHP = (vests) =>
-    parseFloat(vests) * totalVestingFundHive / totalVestingShares;
+  const vestsToHP = await getDynamicProps();
+
+  // 1. Load previous delegators if file exists
+  let existingDelegators = [];
+  if (fs.existsSync(OUTPUT_FILE)) {
+    try {
+      const prevData = JSON.parse(fs.readFileSync(OUTPUT_FILE));
+      existingDelegators = Object.keys(prevData);
+    } catch (e) {
+      console.warn('⚠️ Failed to load previous delegation_history.json');
+    }
+  }
+
+  // 2. Load followers
+  const followers = await getFollowers(TARGET_ACCOUNT);
+
+  // 3. Combine and deduplicate
+  const candidates = [...new Set([...existingDelegators, ...followers])];
+
+  console.log(`🔍 Checking delegations to @${TARGET_ACCOUNT} from ${candidates.length} possible accounts...`);
 
   const history = {};
-  let start = null;
 
-  while (true) {
-    const delegations = await hive.api.getVestingDelegationsAsync(TARGET_ACCOUNT, start || '', 100);
-    if (delegations.length === 0) break;
+  for (const delegator of candidates) {
+    try {
+      const delegations = await hive.api.getVestingDelegationsAsync(delegator, '', 100);
+      for (const delegation of delegations) {
+        if (delegation.delegatee !== TARGET_ACCOUNT) continue;
 
-    for (const delegation of delegations) {
-      const from = delegation.delegator;
-      const hp = vestsToHP(delegation.vesting_shares).toFixed(3);
+        const hp = parseFloat(vestsToHP(delegation.vesting_shares).toFixed(3));
+        if (!history[delegator]) history[delegator] = [];
 
-      if (!history[from]) history[from] = [];
-      history[from].push({
-        amount: parseFloat(hp),
-        timestamp: TEST_TIMESTAMP
-      });
+        history[delegator].push({
+          amount: hp,
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (err) {
+      console.warn(`⚠️ Error fetching delegations from @${delegator}: ${err.message}`);
     }
-
-    const last = delegations[delegations.length - 1];
-    if (!last || last.delegator === start) break;
-    start = last.delegator;
   }
 
   fs.writeFileSync(OUTPUT_FILE, JSON.stringify(history, null, 2));
-  console.log(`✅ delegation_history.json generated/updated.`);
+  console.log(`✅ ${OUTPUT_FILE} generated/updated.`);
 }
 
-main().catch((err) => {
-  console.error('❌ Error occurred while fetching delegations:', err);
-});
+main().catch(console.error);
