@@ -8,9 +8,27 @@ const now = new Date().toISOString();
 
 (async () => {
   try {
-    const delegations = await dhive.api.getVestingDelegationsAsync(ACCOUNT, "", 1000);
-    let history = {};
+    console.log(`🔍 Scanning all delegations TO @${ACCOUNT}...`);
 
+    // Get list of all accounts (or optimize with a known list)
+    let accountsList = await dhive.api.lookupAccountsAsync("", 1000);
+    let allDelegators = [];
+
+    for (let i = 0; i < accountsList.length; i += 100) {
+      const chunk = accountsList.slice(i, i + 100);
+      const accounts = await dhive.api.getAccountsAsync(chunk);
+
+      for (const acc of accounts) {
+        const vesting = acc.delegated_vesting_shares;
+        const hasDelegated = acc.vesting_delegations?.some(d => d.delegatee === ACCOUNT);
+
+        if (vesting && parseFloat(vesting.split(" ")[0]) > 0 && hasDelegated) {
+          allDelegators.push(acc);
+        }
+      }
+    }
+
+    let history = {};
     if (fs.existsSync(HISTORY_FILE)) {
       try {
         history = JSON.parse(fs.readFileSync(HISTORY_FILE));
@@ -21,20 +39,19 @@ const now = new Date().toISOString();
 
     let changed = false;
 
-    for (const d of delegations) {
-      const delegator = d.delegator;
-      const vests = parseFloat(d.vesting_shares.split(" ")[0]);
+    for (const acc of allDelegators) {
+      const vests = parseFloat(acc.delegated_vesting_shares.split(" ")[0]);
       const hp = await vestsToHP(vests);
 
-      if (!history[delegator]) {
-        history[delegator] = [];
+      if (!history[acc.name]) {
+        history[acc.name] = [];
       }
 
-      const alreadyRecorded = history[delegator].some(entry => Math.abs(entry.amount - hp) < 0.001);
+      const alreadyRecorded = history[acc.name].some(entry => Math.abs(entry.amount - hp) < 0.001);
 
       if (!alreadyRecorded) {
-        history[delegator].push({ amount: parseFloat(hp.toFixed(3)), timestamp: now });
-        console.log(`➕ Delegation from @${delegator}: ${hp.toFixed(3)} HP`);
+        history[acc.name].push({ amount: parseFloat(hp.toFixed(3)), timestamp: now });
+        console.log(`➕ Delegation from @${acc.name}: ${hp.toFixed(3)} HP`);
         changed = true;
       }
     }
