@@ -5,53 +5,60 @@ const hive = require('@hiveio/hive-js');
 const OUTPUT_FILE = 'scripts/delegation_history.json';
 const TARGET_ACCOUNT = process.env.HIVE_USER;
 
-if (!TARGET_ACCOUNT) {
-  console.error('❌ Missing HIVE_USER environment variable. Please set it in GitHub Secrets or .env file.');
-  process.exit(1);
-}
-
 async function main() {
-  console.log(`🔍 Fetching delegations to @${TARGET_ACCOUNT}...`);
+  console.log(`🔍 Fetching all incoming delegations to @${TARGET_ACCOUNT}...`);
 
   const dynamicProps = await hive.api.getDynamicGlobalPropertiesAsync();
   const totalVestingFundHive = parseFloat(dynamicProps.total_vesting_fund_hive);
   const totalVestingShares = parseFloat(dynamicProps.total_vesting_shares);
+
   const vestsToHP = (vests) =>
     parseFloat(vests) * totalVestingFundHive / totalVestingShares;
 
-  // Load existing history if it exists
+  // Load existing history
   let history = {};
   if (fs.existsSync(OUTPUT_FILE)) {
-    try {
-      history = JSON.parse(fs.readFileSync(OUTPUT_FILE));
-    } catch (e) {
-      console.warn('⚠️ Failed to parse existing history. Starting fresh.');
-      history = {};
-    }
+    history = JSON.parse(fs.readFileSync(OUTPUT_FILE));
   }
 
-  const delegations = await hive.api.getVestingDelegationsAsync(TARGET_ACCOUNT, '', 1000);
-  const now = new Date().toISOString();
+  const newHistory = { ...history };
+  let start = '';
+  const seen = new Set();
 
-  for (const delegation of delegations) {
-    const from = delegation.delegator;
-    const hp = vestsToHP(delegation.vesting_shares).toFixed(3);
-    if (!history[from]) history[from] = [];
+  while (true) {
+    const delegations = await hive.api.getVestingDelegationsAsync(start, '', 100);
+    if (delegations.length === 0) break;
 
-    const alreadyLogged = history[from].some(entry => parseFloat(entry.amount) === parseFloat(hp));
-    if (!alreadyLogged) {
-      history[from].push({
-        amount: parseFloat(hp),
-        timestamp: now
-      });
-      console.log(`➕ Logged delegation from ${from}: ${hp} HP`);
-    } else {
-      console.log(`✅ Already logged delegation from ${from}: ${hp} HP`);
+    for (const delegation of delegations) {
+      if (delegation.delegatee !== TARGET_ACCOUNT) continue;
+
+      const from = delegation.delegator;
+      if (seen.has(from)) continue; // Avoid duplicates in case of overlap
+      seen.add(from);
+
+      const hp = parseFloat(vestsToHP(delegation.vesting_shares).toFixed(3));
+      const now = new Date().toISOString();
+
+      if (!newHistory[from]) {
+        newHistory[from] = [{ amount: hp, timestamp: now }];
+        console.log(`➕ New delegator: ${from} → ${hp} HP`);
+      } else {
+        const lastAmount = newHistory[from][newHistory[from].length - 1].amount;
+        if (hp > lastAmount) {
+          newHistory[from].push({ amount: hp, timestamp: now });
+          console.log(`🔼 Updated delegation: ${from} → ${hp} HP (was ${lastAmount})`);
+        }
+      }
     }
+
+    // Prepare for next batch
+    const last = delegations[delegations.length - 1];
+    start = last.delegator;
+    if (delegations.length < 100) break; // End if no more
   }
 
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(history, null, 2));
-  console.log(`✅ delegation_history.json generated/updated.`);
+  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(newHistory, null, 2));
+  console.log(`✅ delegation_history.json generated/updated with ${Object.keys(newHistory).length} delegators.`);
 }
 
 main().catch(console.error);
