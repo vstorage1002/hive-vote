@@ -14,28 +14,6 @@ async function getDynamicProps() {
   return (vests) => parseFloat(vests) * totalVestingFundHive / totalVestingShares;
 }
 
-// ✅ Get only actual delegators
-async function getDelegators(account) {
-  let start = '';
-  const delegators = [];
-
-  while (true) {
-    const chunk = await hive.api.getVestingDelegationsAsync(start, 100);
-    if (!chunk.length) break;
-
-    for (const entry of chunk) {
-      if (entry.delegatee === account) {
-        delegators.push(entry.delegator);
-      }
-    }
-
-    if (chunk.length < 100) break;
-    start = chunk[chunk.length - 1].delegator;
-  }
-
-  return [...new Set(delegators)];
-}
-
 (async () => {
   const vestsToHP = await getDynamicProps();
 
@@ -48,10 +26,10 @@ async function getDelegators(account) {
     }
   }
 
-  const delegators = await getDelegators(ACCOUNT);
-  const candidates = [...new Set([...Object.keys(oldData), ...delegators])];
+  // Only check users already in the history
+  const candidates = Object.keys(oldData);
 
-  console.log(`🔍 Checking delegations to @${ACCOUNT} from ${candidates.length} possible accounts...`);
+  console.log(`🔍 Checking delegations to @${ACCOUNT} from ${candidates.length} known accounts...`);
 
   let changed = false;
 
