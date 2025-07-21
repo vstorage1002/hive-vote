@@ -36,10 +36,10 @@ function loadDelegationHistory() {
   return loadJSON(DELEGATION_HISTORY_FILE);
 }
 
-function getTodayKey() {
-  const today = new Date(now.getTime() - (8 * 60 * 60 * 1000)); // offset for 8:00 AM
-  today.setUTCHours(8, 0, 0, 0);
-  return today.toISOString().split('T')[0];
+function getYesterdayKey() {
+  const yesterday = new Date(now.getTime() - (8 * 60 * 60 * 1000) - 24 * 60 * 60 * 1000); // offset for 8:00 AM and subtract 1 day
+  yesterday.setUTCHours(8, 0, 0, 0);
+  return yesterday.toISOString().split('T')[0];
 }
 
 function simulateSendPayout(username, amount, memo) {
@@ -67,19 +67,19 @@ function getEligibleDelegationAmount(history) {
 function main() {
   const rewards = loadRewardCache();
   const history = loadDelegationHistory();
-  const todayKey = getTodayKey();
+  const yesterdayKey = getYesterdayKey();
 
   console.log('Loaded rewards:', rewards);
   console.log('Loaded delegation history:', history);
 
-  const todayReward = rewards[todayKey]?.curation_reward || 0;
-  console.log(`Today's curation reward: ${todayReward.toFixed(6)}`);
-  
-  if (todayReward === 0) {
-    console.log('⚠️ No curation reward found for today.');
+  const yesterdayReward = rewards[yesterdayKey]?.curation_reward || 0;
+  console.log(`Yesterday's curation reward: ${yesterdayReward.toFixed(6)}`);
+
+  if (yesterdayReward === 0) {
+    console.log('⚠️ No curation reward found for yesterday.');
   }
 
-  const totalReward = todayReward * 0.95;
+  const totalReward = yesterdayReward * 0.95;
   const breakdown = [];
 
   console.log(`Total curation reward to distribute (95%): ${totalReward.toFixed(6)} HIVE`);
@@ -101,7 +101,7 @@ function main() {
   for (const [delegator, hp] of Object.entries(delegatorEligibleHP)) {
     const payout = calculateCurationPortion(totalReward, hp, totalEligibleHP);
     if (payout >= MIN_PAYOUT) {
-      simulateSendPayout(delegator, payout, `Curation reward for ${todayKey}`);
+      simulateSendPayout(delegator, payout, `Curation reward for ${yesterdayKey}`);
       breakdown.push(`${delegator}: ${payout.toFixed(6)} HIVE for ${hp} HP`);
     } else {
       console.log(`[SKIP] ${delegator} payout ${payout.toFixed(6)} < ${MIN_PAYOUT}`);
@@ -109,7 +109,7 @@ function main() {
   }
 
   if (breakdown.length > 0) {
-    logToFile(CURATION_LOG_FILE, `[${todayKey}]\n` + breakdown.join('\n'));
+    logToFile(CURATION_LOG_FILE, `[${yesterdayKey}]\n` + breakdown.join('\n'));
   }
 }
 
