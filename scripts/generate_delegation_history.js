@@ -26,8 +26,8 @@ async function getDynamicProps() {
     }
   }
 
-  // Step 1: Get current delegators (live scan)
-  let delegators = new Set();
+  // Step 1: Get current delegators (live)
+  let currentDelegators = new Set();
   let start = '';
   let done = false;
 
@@ -40,7 +40,7 @@ async function getDynamicProps() {
 
       for (const delegation of delegations) {
         if (delegation.delegatee === ACCOUNT) {
-          delegators.add(delegation.delegator);
+          currentDelegators.add(delegation.delegator);
         }
       }
 
@@ -52,12 +52,15 @@ async function getDynamicProps() {
     }
   }
 
-  const candidates = [...new Set([...Object.keys(oldData), ...delegators])];
-  console.log(`📋 Found ${candidates.length} candidate accounts with current or past delegations.`);
+  // Step 2: Union of historical and current delegators
+  const allDelegators = [...new Set([
+    ...Object.keys(oldData),
+    ...currentDelegators
+  ])];
 
   let changed = false;
 
-  for (const user of candidates) {
+  for (const user of allDelegators) {
     try {
       const userDelegations = await hive.api.getVestingDelegationsAsync(user, '', 100);
       const entry = userDelegations.find(d => d.delegatee === ACCOUNT);
