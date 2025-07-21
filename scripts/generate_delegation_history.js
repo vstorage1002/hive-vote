@@ -6,43 +6,11 @@ const ACCOUNT = process.env.HIVE_USER || "bayanihive";
 const HISTORY_FILE = "scripts/delegation_history.json";
 const now = new Date().toISOString();
 
-async function getDelegators(account) {
-  let followers = [];
-  let start = "";
-  let limit = 100;
-  let done = false;
-
-  console.log(`📡 Fetching followers of @${account}...`);
-
-  while (!done) {
-    const result = await dhive.api.getFollowersAsync(account, start, "blog", limit);
-    if (result.length < limit) done = true;
-    if (result.length > 0) {
-      start = result[result.length - 1].follower;
-      followers = followers.concat(result.map(r => r.follower));
-    }
-  }
-
-  return followers;
-}
-
 (async () => {
   try {
-    const followers = await getDelegators(ACCOUNT);
-    const chunks = [];
-
-    // Split into chunks of 100 accounts (API limit)
-    while (followers.length) {
-      chunks.push(followers.splice(0, 100));
-    }
-
-    const accounts = [];
-    for (const chunk of chunks) {
-      const accs = await dhive.api.getAccountsAsync(chunk);
-      accounts.push(...accs);
-    }
-
+    const delegations = await dhive.api.getVestingDelegationsAsync(ACCOUNT, "", 1000);
     let history = {};
+
     if (fs.existsSync(HISTORY_FILE)) {
       try {
         history = JSON.parse(fs.readFileSync(HISTORY_FILE));
@@ -53,24 +21,21 @@ async function getDelegators(account) {
 
     let changed = false;
 
-    for (const acc of accounts) {
-      const delegatedToMe = acc.vesting_delegations?.some(d => d.delegatee === ACCOUNT);
-      const vests = acc.delegated_vesting_shares;
+    for (const d of delegations) {
+      const delegator = d.delegator;
+      const vests = parseFloat(d.vesting_shares.split(" ")[0]);
+      const hp = await vestsToHP(vests);
 
-      if (vests && parseFloat(vests.split(" ")[0]) > 0) {
-        const hp = await vestsToHP(parseFloat(vests.split(" ")[0]));
+      if (!history[delegator]) {
+        history[delegator] = [];
+      }
 
-        if (!history[acc.name]) {
-          history[acc.name] = [];
-        }
+      const alreadyRecorded = history[delegator].some(entry => Math.abs(entry.amount - hp) < 0.001);
 
-        const alreadyRecorded = history[acc.name].some(entry => Math.abs(entry.amount - hp) < 0.001);
-
-        if (!alreadyRecorded) {
-          history[acc.name].push({ amount: parseFloat(hp.toFixed(3)), timestamp: now });
-          console.log(`➕ Delegation from @${acc.name}: ${hp.toFixed(3)} HP`);
-          changed = true;
-        }
+      if (!alreadyRecorded) {
+        history[delegator].push({ amount: parseFloat(hp.toFixed(3)), timestamp: now });
+        console.log(`➕ Delegation from @${delegator}: ${hp.toFixed(3)} HP`);
+        changed = true;
       }
     }
 
