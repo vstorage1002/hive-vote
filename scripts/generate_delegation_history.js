@@ -2,7 +2,7 @@ const fs = require("fs");
 const dhive = require("@hiveio/hive-js");
 require("dotenv").config();
 
-const ACCOUNT = process.env.HIVE_USER || "youraccount";
+const ACCOUNT = process.env.HIVE_USER || 'bayanihive';
 const HISTORY_FILE = "scripts/delegation_history.json";
 const CANDIDATES_FILE = "scripts/delegator_candidates.json";
 const now = new Date().toISOString();
@@ -16,28 +16,37 @@ async function vestsToHP(vests) {
 
 (async () => {
   try {
-    console.log(`🔍 Checking delegations from known candidates TO @${ACCOUNT}...`);
+    console.log(`🔍 Checking delegations TO @${ACCOUNT}...`);
 
-    const candidates = JSON.parse(fs.readFileSync(CANDIDATES_FILE));
+    const candidates = fs.existsSync(CANDIDATES_FILE)
+      ? JSON.parse(fs.readFileSync(CANDIDATES_FILE))
+      : null;
+
     const delegators = {};
+    let start = '';
+    let done = false;
 
-    for (const delegator of candidates) {
-      try {
-        const delegations = await dhive.api.getVestingDelegationsAsync(delegator, 0, 100);
-        for (const d of delegations) {
-          if (d.delegatee === ACCOUNT) {
-            const amount = parseFloat(d.vesting_shares.split(" ")[0]);
-            const hp = await vestsToHP(amount);
-            if (!delegators[delegator]) delegators[delegator] = [];
-            delegators[delegator].push({
-              amount: parseFloat(hp.toFixed(3)),
-              timestamp: now
-            });
-          }
-        }
-      } catch (e) {
-        console.warn(`⚠️ Skipped invalid account @${delegator}: ${e.message}`);
+    while (!done) {
+      const delegations = await dhive.api.getVestingDelegationsAsync(ACCOUNT, start, 100);
+      if (delegations.length === 0) break;
+
+      for (const d of delegations) {
+        const delegator = d.delegator;
+        if (candidates && !candidates.includes(delegator)) continue;
+
+        const amount = parseFloat(d.vesting_shares.split(" ")[0]);
+        const hp = await vestsToHP(amount);
+
+        if (!delegators[delegator]) delegators[delegator] = [];
+        delegators[delegator].push({
+          amount: parseFloat(hp.toFixed(3)),
+          timestamp: now
+        });
+
+        start = delegator;
       }
+
+      done = delegations.length < 100;
     }
 
     let existing = {};
