@@ -2,8 +2,9 @@ const fs = require("fs");
 const dhive = require("@hiveio/hive-js");
 require("dotenv").config();
 
-const ACCOUNT = process.env.HIVE_USER || 'bayanihive';
+const ACCOUNT = process.env.HIVE_USER || "youraccount";
 const HISTORY_FILE = "scripts/delegation_history.json";
+const CANDIDATES_FILE = "scripts/delegator_candidates.json";
 const now = new Date().toISOString();
 
 async function vestsToHP(vests) {
@@ -15,27 +16,28 @@ async function vestsToHP(vests) {
 
 (async () => {
   try {
-    console.log(`🔍 Scanning all delegations TO @${ACCOUNT}...`);
+    console.log(`🔍 Checking delegations from known candidates TO @${ACCOUNT}...`);
+
+    const candidates = JSON.parse(fs.readFileSync(CANDIDATES_FILE));
     const delegators = {};
-    let start = "";
-    const limit = 100;
 
-    while (true) {
-      const delegations = await dhive.api.getVestingDelegationsAsync(start, ACCOUNT, limit);
-      if (delegations.length === 0) break;
-
-      for (const d of delegations) {
-        if (d.delegatee === ACCOUNT) {
-          const delegator = d.delegator;
-          const amount = parseFloat(d.vesting_shares.split(" ")[0]);
-          const hp = await vestsToHP(amount);
-          if (!delegators[delegator]) delegators[delegator] = [];
-          delegators[delegator].push({ amount: parseFloat(hp.toFixed(3)), timestamp: now });
+    for (const delegator of candidates) {
+      try {
+        const delegations = await dhive.api.getVestingDelegationsAsync(delegator, 0, 100);
+        for (const d of delegations) {
+          if (d.delegatee === ACCOUNT) {
+            const amount = parseFloat(d.vesting_shares.split(" ")[0]);
+            const hp = await vestsToHP(amount);
+            if (!delegators[delegator]) delegators[delegator] = [];
+            delegators[delegator].push({
+              amount: parseFloat(hp.toFixed(3)),
+              timestamp: now
+            });
+          }
         }
+      } catch (e) {
+        console.warn(`⚠️ Skipped invalid account @${delegator}: ${e.message}`);
       }
-
-      if (delegations.length < limit) break;
-      start = delegations[delegations.length - 1].delegator;
     }
 
     let existing = {};
