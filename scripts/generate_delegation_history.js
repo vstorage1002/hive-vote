@@ -1,68 +1,45 @@
 require('dotenv').config();
+const axios = require('axios');
 const fs = require('fs');
-const dhive = require('@hiveio/dhive');
 
+const HIVE_USER = process.env.HIVE_USER;
+const HIVE_API = process.env.HIVE_API || 'https://api.hive.blog';
+
+const CANDIDATES_FILE = 'delegator_candidates.json';
 const HISTORY_FILE = 'delegation_history.json';
-const DELEGATOR_CANDIDATES_FILE = 'delegator_candidates.json';
-const client = new dhive.Client(process.env.HIVE_API || 'https://api.hive.blog');
 
-const account = process.env.HIVE_USER;
+// Get vesting delegations for a given account
+async function getVestingDelegations(account) {
+  const res = await axios.post(HIVE_API, {
+    jsonrpc: '2.0',
+    method: 'condenser_api.get_vesting_delegations',
+    params: [account, '', 100],
+    id: 1,
+  });
+
+  return res.data.result;
+}
 
 async function main() {
-  console.log(`🔍 Checking delegations TO @${account}...`);
+  console.log(`🔍 Checking delegations TO @${HIVE_USER}...`);
 
-  // Load existing history or initialize empty
-  let existing = {};
+  // Load delegator candidates
+  const candidates = JSON.parse(fs.readFileSync(CANDIDATES_FILE));
+  const now = Date.now();
+
+  // Load or initialize history
+  let history = {};
   if (fs.existsSync(HISTORY_FILE)) {
     try {
-      existing = JSON.parse(fs.readFileSync(HISTORY_FILE));
+      history = JSON.parse(fs.readFileSync(HISTORY_FILE));
     } catch (e) {
-      console.warn("⚠️ Failed to read delegation_history.json, initializing empty.");
-      existing = {};
+      console.warn('⚠️ Invalid JSON format in delegation_history.json. Resetting.');
+      history = {};
     }
   }
 
-  const candidates = JSON.parse(fs.readFileSync(DELEGATOR_CANDIDATES_FILE));
-  const now = Date.now();
-  let updated = false;
-  let count = 0;
+  let newCount = 0;
 
   for (const delegator of candidates) {
     try {
-      const [vestingDelegations] = await client.call('database_api', 'find_vesting_delegations', {
-        account: delegator,
-        start: account,
-        limit: 1
-      });
-
-      const delegation = vestingDelegations.delegations?.[0];
-      const isDelegatingToUs = delegation && delegation.delegatee === account;
-
-      if (isDelegatingToUs) {
-        if (!existing[delegator]) {
-          existing[delegator] = [
-            { start_timestamp: now }
-          ];
-          updated = true;
-          console.log(`✅ New delegation from @${delegator} recorded.`);
-        } else {
-          // Already tracked
-          // You can optionally check if amount changed and record new entry
-        }
-        count++;
-      }
-    } catch (err) {
-      console.warn(`⚠️ Error checking @${delegator}: ${err.message}`);
-    }
-  }
-
-  // Write even if nothing changed but file was empty
-  if (updated || Object.keys(existing).length === 0) {
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(existing, null, 2));
-    console.log(`✅ delegation_history.json written/updated with ${count} delegators.`);
-  } else {
-    console.log("🟡 No new delegations found. File untouched.");
-  }
-}
-
-main().catch(console.error);
+      const delegations = await ge
