@@ -42,4 +42,30 @@ async function main() {
 
   for (const delegator of candidates) {
     try {
-      const delegations = await ge
+      const delegations = await getVestingDelegations(delegator);
+      const match = delegations.find(d => d.delegatee === HIVE_USER && parseFloat(d.vesting_shares) > 0);
+
+      if (match) {
+        if (!history[delegator]) {
+          history[delegator] = [{ start_timestamp: now }];
+          console.log(`✅ New delegation from @${delegator}`);
+          newCount++;
+        } else {
+          console.log(`➡️ @${delegator} already in delegation history.`);
+        }
+      }
+    } catch (err) {
+      console.warn(`❌ Failed to check @${delegator}: ${err.message}`);
+    }
+  }
+
+  if (newCount > 0 || Object.keys(history).length === 0) {
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
+    console.log(`✅ Updated delegation_history.json with ${newCount} new entries.`);
+  } else {
+    console.log('🟡 No new delegators found. File untouched.');
+  }
+}
+
+// 🟢 Start script
+main().catch(console.error);
