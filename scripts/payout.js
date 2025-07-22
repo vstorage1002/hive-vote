@@ -11,7 +11,7 @@ const REWARD_CACHE_FILE = 'ui/reward_cache.json';
 const PAYOUT_LOG_FILE = 'ui/payout.log';
 const DELEGATION_HISTORY_FILE = 'delegation_history.json';
 const MIN_PAYOUT = 0.001;
-const IS_DRY_RUN = false; // 🔁 Set to false for real payouts : SET TO TRUE FOR DRY RUN TESTING
+const IS_DRY_RUN = true; // 🔁 Set to false for real payouts : SET TO TRUE FOR DRY RUN TESTING
 
 const API_NODES = [
   'https://api.hive.blog',
@@ -144,25 +144,43 @@ async function getCurationRewards() {
   const fromTime = start.getTime();
   const toTime = end.getTime();
 
-  const history = await new Promise((resolve, reject) => {
-    hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, res) => {
-      if (err) return reject(err);
-      resolve(res);
-    });
-  });
-
+  let startIndex = -1;
   let totalVests = 0;
-  for (const [, op] of history) {
-    if (op.op[0] === 'curation_reward') {
-      const opTime = new Date(op.timestamp + 'Z').getTime();
-      if (opTime >= fromTime && opTime < toTime) {
-        totalVests += parseFloat(op.op[1].reward);
+  const limit = 1000;
+  let done = false;
+
+  while (!done) {
+    const history = await new Promise((resolve, reject) => {
+      hive.api.getAccountHistory(HIVE_USER, startIndex, limit, (err, res) => {
+        if (err) return reject(err);
+        resolve(res);
+      });
+    });
+
+    if (!history || history.length === 0) break;
+
+    for (const [index, op] of history.reverse()) {
+      const { timestamp, op: [type, data] } = op;
+      const opTime = new Date(timestamp + 'Z').getTime();
+
+      if (type === 'curation_reward' && opTime >= fromTime && opTime < toTime) {
+        totalVests += parseFloat(data.reward);
       }
+
+      if (opTime < fromTime) {
+        done = true;
+        break;
+      }
+
+      startIndex = index - 1; // Move further back
     }
+
+    if (history.length < limit) break;
   }
 
   return totalVests;
 }
+
 
 
 async function getDynamicProps() {
