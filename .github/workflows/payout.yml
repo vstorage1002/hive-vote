@@ -28,7 +28,7 @@ jobs:
         run: node scripts/init_db.js
 
       - name: Update delegation history
-        run: node scripts/delegation_history.js
+        run: node scripts/generate_delegation_history.js
         env:
           HIVE_USER: ${{ secrets.HIVE_USER }}
 
