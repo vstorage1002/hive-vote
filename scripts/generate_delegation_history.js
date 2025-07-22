@@ -1,16 +1,13 @@
+require('dotenv').config();
 const hive = require('@hiveio/hive-js');
 const fs = require('fs');
-require('dotenv').config();
+const path = require('path');
 
 const HIVE_USER = process.env.HIVE_USER;
-const OUTPUT_FILE = 'delegation_history.json';
+const OUTPUT_FILE = path.join(__dirname, 'delegation_history.json');
 
 function saveDelegationHistory(data) {
-  const path = require('path');
-const fs = require('fs');
-
-const OUTPUT_FILE = path.join(__dirname, 'delegation_history.json');
-fs.writeFileSync(OUTPUT_FILE, JSON.stringify(history, null, 2));
+  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(data, null, 2));
 }
 
 async function fetchDelegationHistory() {
@@ -52,6 +49,7 @@ async function fetchDelegationHistory() {
   }
 
   saveDelegationHistory(delegations);
+  console.log(`✅ Saved delegation history for ${Object.keys(delegations).length} delegators to delegation_history.json`);
 }
 
 fetchDelegationHistory().catch(console.error);
