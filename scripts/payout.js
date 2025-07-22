@@ -1,116 +1,278 @@
-// payout.js (Adjusted for testing only)
-require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
 const hive = require('@hiveio/hive-js');
+const fs = require('fs');
+const https = require('https');
+require('dotenv').config();
+
+const HIVE_USER = process.env.HIVE_USER;
+const ACTIVE_KEY = process.env.ACTIVE_KEY;
+const DELEGATION_WEBHOOK_URL = process.env.DELEGATION_WEBHOOK_URL;
 
 const REWARD_CACHE_FILE = 'ui/reward_cache.json';
 const PAYOUT_LOG_FILE = 'ui/payout.log';
-const CURATION_LOG_FILE = 'ui/curation_breakdown.log';
 const DELEGATION_HISTORY_FILE = 'delegation_history.json';
 const MIN_PAYOUT = 0.001;
-const now = new Date();
 
-function logToFile(file, content) {
-  fs.appendFileSync(file, `${content}\n`, 'utf8');
+const API_NODES = [
+  'https://api.hive.blog',
+  'https://api.openhive.network',
+  'https://anyx.io',
+  'https://rpc.ausbit.dev',
+  'https://hived.privex.io',
+];
+
+function sendWebhookMessage(content, url) {
+  if (!url) return;
+  const data = JSON.stringify({ content });
+  const parsed = new URL(url);
+
+  const options = {
+    hostname: parsed.hostname,
+    path: parsed.pathname + parsed.search,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': data.length
+    }
+  };
+
+  const req = https.request(options, res => {
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      console.warn(`⚠️ Webhook failed with status ${res.statusCode}`);
+    }
+  });
+
+  req.on('error', error => console.error('Webhook error:', error));
+  req.write(data);
+  req.end();
 }
 
-function loadJSON(filePath) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath));
-  } catch (error) {
-    console.error(`Error loading file ${filePath}:`, error);
-    return {};
+async function pickWorkingNode() {
+  for (const url of API_NODES) {
+    hive.api.setOptions({ url });
+    console.log(`🌐 Trying Hive API node: ${url}`);
+    const test = await new Promise(resolve => {
+      hive.api.getAccounts([HIVE_USER], (err, res) => {
+        resolve(err || !res ? null : res);
+      });
+    });
+    if (test) {
+      console.log(`✅ Using Hive API: ${url}`);
+      return;
+    }
   }
-}
-
-function saveJSON(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-}
-
-function loadRewardCache() {
-  return loadJSON(REWARD_CACHE_FILE);
+  throw new Error('❌ No working Hive API found.');
 }
 
 function loadDelegationHistory() {
-  return loadJSON(DELEGATION_HISTORY_FILE);
+  if (!fs.existsSync(DELEGATION_HISTORY_FILE)) fs.writeFileSync(DELEGATION_HISTORY_FILE, '[]');
+  return JSON.parse(fs.readFileSync(DELEGATION_HISTORY_FILE));
 }
 
-function getYesterdayKey() {
-  const yesterday = new Date(now.getTime() - (8 * 60 * 60 * 1000) - 24 * 60 * 60 * 1000); // offset for 8:00 AM and subtract 1 day
-  yesterday.setUTCHours(8, 0, 0, 0);
-  return yesterday.toISOString().split('T')[0];
+function saveDelegationHistory(data) {
+  fs.writeFileSync(DELEGATION_HISTORY_FILE, JSON.stringify(data, null, 2));
 }
 
-function simulateSendPayout(username, amount, memo) {
-  console.log(`[TEST] Would send ${amount.toFixed(6)} HIVE to @${username} | Memo: ${memo}`);
-  logToFile(PAYOUT_LOG_FILE, `[${now.toISOString()}] TEST payout: ${amount.toFixed(6)} HIVE to @${username}`);
-}
+async function fetchFullDelegationHistory() {
+  let start = -1;
+  const limit = 1000;
+  const rawHistory = [];
 
-function calculateCurationPortion(totalReward, delegatorHP, totalHP) {
-  return totalReward * (delegatorHP / totalHP);
-}
+  while (true) {
+    const history = await new Promise((resolve, reject) => {
+      hive.api.getAccountHistory(HIVE_USER, start, limit, (err, res) => {
+        if (err) return reject(err);
+        resolve(res);
+      });
+    });
 
-function isMature(delegationDate) {
-  const sevenDays = 7 * 24 * 60 * 60 * 1000;
-  return now - new Date(delegationDate) >= sevenDays;
-}
-
-function getEligibleDelegationAmount(history) {
-  let eligible = 0;
-  for (const h of history) {
-    if (isMature(h.timestamp)) eligible += h.amount;
-  }
-  return eligible;
-}
-
-function main() {
-  const rewards = loadRewardCache();
-  const history = loadDelegationHistory();
-  const yesterdayKey = getYesterdayKey();
-
-  console.log('Loaded rewards:', rewards);
-  console.log('Loaded delegation history:', history);
-
-  const yesterdayReward = rewards[yesterdayKey]?.curation_reward || 0;
-  console.log(`Yesterday's curation reward: ${yesterdayReward.toFixed(6)}`);
-
-  if (yesterdayReward === 0) {
-    console.log('⚠️ No curation reward found for yesterday.');
+    if (!history || history.length === 0) break;
+    rawHistory.push(...history);
+    start = history[0][0] - 1;
+    if (history.length < limit) break;
   }
 
-  const totalReward = yesterdayReward * 0.95;
-  const breakdown = [];
+  const delegations = [];
+  for (const [, op] of rawHistory) {
+    if (op.op[0] === 'delegate_vesting_shares') {
+      const { delegator, delegatee, vesting_shares } = op.op[1];
+      const timestamp = new Date(op.timestamp + 'Z').getTime();
 
-  console.log(`Total curation reward to distribute (95%): ${totalReward.toFixed(6)} HIVE`);
-
-  const delegatorEligibleHP = {};
-  let totalEligibleHP = 0;
-
-  for (const [delegator, entries] of Object.entries(history)) {
-    const eligibleHP = getEligibleDelegationAmount(entries);
-    if (eligibleHP > 0) {
-      delegatorEligibleHP[delegator] = eligibleHP;
-      totalEligibleHP += eligibleHP;
+      if (delegatee === HIVE_USER) {
+        delegations.push({
+          delegator,
+          vests: parseFloat(vesting_shares),
+          timestamp
+        });
+      }
     }
   }
 
-  console.log('Delegator Eligible HP:', delegatorEligibleHP);
-  console.log('Total Eligible HP:', totalEligibleHP);
+  const result = {};
+  for (const d of delegations) {
+    if (!result[d.delegator]) result[d.delegator] = [];
+    result[d.delegator].push({ vests: d.vests, timestamp: d.timestamp });
+  }
 
-  for (const [delegator, hp] of Object.entries(delegatorEligibleHP)) {
-    const payout = calculateCurationPortion(totalReward, hp, totalEligibleHP);
-    if (payout >= MIN_PAYOUT) {
-      simulateSendPayout(delegator, payout, `Curation reward for ${yesterdayKey}`);
-      breakdown.push(`${delegator}: ${payout.toFixed(6)} HIVE for ${hp} HP`);
+  for (const user in result) {
+    const chunks = result[user];
+    const filtered = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const prev = i === 0 ? 0 : chunks[i - 1].vests;
+      const diff = chunks[i].vests - prev;
+      if (diff !== 0) {
+        filtered.push({ vests: diff, timestamp: chunks[i].timestamp });
+      }
+    }
+    result[user] = filtered;
+  }
+
+  saveDelegationHistory(result);
+  return result;
+}
+
+async function getCurationRewards() {
+  const now = new Date();
+  const phTz = 'Asia/Manila';
+  const today8AM = new Date(now.toLocaleString('en-US', { timeZone: phTz }));
+  today8AM.setHours(8, 0, 0, 0);
+  const fromTime = today8AM.getTime() - 24 * 60 * 60 * 1000;
+
+  const history = await new Promise((resolve, reject) => {
+    hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, res) => {
+      if (err) return reject(err);
+      resolve(res);
+    });
+  });
+
+  let totalVests = 0;
+  for (const [, op] of history) {
+    if (op.op[0] === 'curation_reward') {
+      const opTime = new Date(op.timestamp + 'Z').getTime();
+      if (opTime >= fromTime && opTime < today8AM.getTime()) {
+        totalVests += parseFloat(op.op[1].reward);
+      }
+    }
+  }
+  return totalVests;
+}
+
+async function getDynamicProps() {
+  return new Promise((resolve, reject) => {
+    hive.api.getDynamicGlobalProperties((err, res) => {
+      if (err) return reject(err);
+      resolve(res);
+    });
+  });
+}
+
+function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
+  return (vests * totalVestingFundHive) / totalVestingShares;
+}
+
+async function sendPayout(to, amount) {
+  const phDate = new Date().toLocaleDateString('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
+  const memo = `Thank you for your delegation to @${HIVE_USER} — ${phDate}`;
+
+  return new Promise((resolve, reject) => {
+    hive.broadcast.transfer(
+      ACTIVE_KEY,
+      HIVE_USER,
+      to,
+      `${amount.toFixed(3)} HIVE`,
+      memo,
+      (err, result) => {
+        if (err) return reject(err);
+        console.log(`✅ Sent ${amount.toFixed(3)} HIVE to @${to}`);
+        resolve(result);
+      }
+    );
+  });
+}
+
+function loadRewardCache() {
+  if (!fs.existsSync(REWARD_CACHE_FILE)) fs.writeFileSync(REWARD_CACHE_FILE, '{}');
+  return JSON.parse(fs.readFileSync(REWARD_CACHE_FILE));
+}
+
+function saveRewardCache(cache) {
+  fs.writeFileSync(REWARD_CACHE_FILE, JSON.stringify(cache, null, 2));
+}
+
+function logPayout(dateStr, totalHive) {
+  const line = `${dateStr} - ✅ Payout done: ${totalHive.toFixed(6)} HIVE\n`;
+  fs.appendFileSync(PAYOUT_LOG_FILE, line);
+}
+
+async function distributeRewards() {
+  console.log(`🚀 Calculating rewards for @${HIVE_USER}...`);
+  await pickWorkingNode();
+
+  const [props, delegationChunks, totalVests] = await Promise.all([
+    getDynamicProps(),
+    fetchFullDelegationHistory(),
+    getCurationRewards()
+  ]);
+
+  const totalVestingShares = parseFloat(props.total_vesting_shares);
+  const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive);
+
+  const totalCurationHive = vestsToHP(
+    totalVests,
+    totalVestingFundHive,
+    totalVestingShares
+  );
+
+  console.log(`📊 Total curation rewards in last 24h: ~${totalCurationHive.toFixed(6)} HIVE`);
+
+  if (totalCurationHive < 0.000001 || Object.keys(delegationChunks).length === 0) {
+    console.log('⚠️ Nothing to distribute.');
+    return;
+  }
+
+  const retained = totalCurationHive * 0.05;
+  const distributable = totalCurationHive * 0.95;
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+  let eligibleTotal = 0;
+  const eligibleDelegators = {};
+
+  for (const [delegator, chunks] of Object.entries(delegationChunks)) {
+    let eligibleVests = 0;
+    for (const chunk of chunks) {
+      if (chunk.timestamp <= cutoff && chunk.vests > 0) {
+        eligibleVests += chunk.vests;
+      }
+    }
+    if (eligibleVests > 0) {
+      eligibleDelegators[delegator] = eligibleVests;
+      eligibleTotal += eligibleVests;
+    }
+  }
+
+  const rewardCache = loadRewardCache();
+
+  for (const [delegator, eligibleVests] of Object.entries(eligibleDelegators)) {
+    const share = eligibleVests / eligibleTotal;
+    const payout = distributable * share;
+    rewardCache[delegator] = (rewardCache[delegator] || 0) + payout;
+
+    if (rewardCache[delegator] >= MIN_PAYOUT) {
+      await sendPayout(delegator, rewardCache[delegator]);
+      rewardCache[delegator] = 0;
     } else {
-      console.log(`[SKIP] ${delegator} payout ${payout.toFixed(6)} < ${MIN_PAYOUT}`);
+      console.log(`📦 Stored for @${delegator}: ${rewardCache[delegator].toFixed(6)} HIVE`);
     }
   }
 
-  if (breakdown.length > 0) {
-    logToFile(CURATION_LOG_FILE, `[${yesterdayKey}]\n` + breakdown.join('\n'));
-  }
+  saveRewardCache(rewardCache);
+  logPayout(new Date().toISOString(), totalCurationHive);
+  console.log(`🏁 Done. 95% distributed, 5% retained (~${retained.toFixed(6)} HIVE).`);
 }
 
-main();
+distributeRewards().catch(console.error);
