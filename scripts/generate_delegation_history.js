@@ -6,8 +6,11 @@ const HIVE_USER = process.env.HIVE_USER;
 const OUTPUT_FILE = 'delegation_history.json';
 
 function saveDelegationHistory(data) {
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(data, null, 2));
-  console.log(`✅ delegation_history.json written with ${Object.keys(data).length} delegators.`);
+  const path = require('path');
+const fs = require('fs');
+
+const OUTPUT_FILE = path.join(__dirname, 'delegation_history.json');
+fs.writeFileSync(OUTPUT_FILE, JSON.stringify(history, null, 2));
 }
 
 async function fetchDelegationHistory() {
