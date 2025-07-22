@@ -1,19 +1,33 @@
-require('dotenv').config();
 const hive = require('@hiveio/hive-js');
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config();
 
 const HIVE_USER = process.env.HIVE_USER;
 const OUTPUT_FILE = path.join(__dirname, 'delegation_history.json');
 
-function saveDelegationHistory(data) {
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(data, null, 2));
+// Helper to convert VESTS to HP
+function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
+  return (vests * totalVestingFundHive) / totalVestingShares;
+}
+
+async function fetchGlobalProps() {
+  return new Promise((resolve, reject) => {
+    hive.api.getDynamicGlobalProperties((err, props) => {
+      if (err) return reject(err);
+      const totalVestingFundHive = parseFloat(props.total_vesting_fund_hive.split(' ')[0]);
+      const totalVestingShares = parseFloat(props.total_vesting_shares.split(' ')[0]);
+      resolve({ totalVestingFundHive, totalVestingShares });
+    });
+  });
 }
 
 async function fetchDelegationHistory() {
   let start = -1;
   const limit = 1000;
   const history = [];
+
+  const { totalVestingFundHive, totalVestingShares } = await fetchGlobalProps();
 
   while (true) {
     const chunk = await new Promise((resolve, reject) => {
@@ -27,7 +41,6 @@ async function fetchDelegationHistory() {
 
     history.push(...chunk);
     start = chunk[0][0] - 1;
-
     if (chunk.length < limit) break;
   }
 
@@ -37,19 +50,22 @@ async function fetchDelegationHistory() {
     if (op.op[0] === 'delegate_vesting_shares') {
       const { delegator, delegatee, vesting_shares } = op.op[1];
       const timestamp = new Date(op.timestamp + 'Z').getTime();
+      const vests = parseFloat(vesting_shares);
 
-      if (delegatee === HIVE_USER && parseFloat(vesting_shares) > 0) {
+      if (delegatee === HIVE_USER && vests > 0) {
+        const hp = vestsToHP(vests, totalVestingFundHive, totalVestingShares);
         if (!delegations[delegator]) delegations[delegator] = [];
         delegations[delegator].push({
-          vests: parseFloat(vesting_shares),
+          vests,
+          hp: parseFloat(hp.toFixed(3)),
           timestamp
         });
       }
     }
   }
 
-  saveDelegationHistory(delegations);
-  console.log(`✅ Saved delegation history for ${Object.keys(delegations).length} delegators to delegation_history.json`);
+  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(delegations, null, 2));
+  console.log(`✅ delegation_history.json written with ${Object.keys(delegations).length} delegators.`);
 }
 
 fetchDelegationHistory().catch(console.error);
