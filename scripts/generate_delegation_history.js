@@ -6,7 +6,6 @@ require('dotenv').config();
 const HIVE_USER = process.env.HIVE_USER;
 const OUTPUT_FILE = path.join(__dirname, 'delegation_history.json');
 
-// Convert VESTS to HP
 function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
   return (vests * totalVestingFundHive) / totalVestingShares;
 }
@@ -29,6 +28,12 @@ async function fetchDelegationHistory() {
 
   const { totalVestingFundHive, totalVestingShares } = await fetchGlobalProps();
 
+  // Load previous history if it exists
+  let existingData = {};
+  if (fs.existsSync(OUTPUT_FILE)) {
+    existingData = JSON.parse(fs.readFileSync(OUTPUT_FILE));
+  }
+
   while (true) {
     const chunk = await new Promise((resolve, reject) => {
       hive.api.getAccountHistory(HIVE_USER, start, limit, (err, res) => {
@@ -44,8 +49,6 @@ async function fetchDelegationHistory() {
     if (chunk.length < limit) break;
   }
 
-  const delegations = {};
-
   for (const [, op] of history) {
     if (op.op[0] === 'delegate_vesting_shares') {
       const { delegator, delegatee, vesting_shares } = op.op[1];
@@ -54,18 +57,25 @@ async function fetchDelegationHistory() {
 
       if (delegatee === HIVE_USER) {
         const hp = vestsToHP(vests, totalVestingFundHive, totalVestingShares);
-        if (!delegations[delegator]) delegations[delegator] = [];
-        delegations[delegator].push({
-          vests,
-          hp: parseFloat(hp.toFixed(3)),
-          timestamp
-        });
+        if (!existingData[delegator]) existingData[delegator] = [];
+
+        // Avoid duplicates by checking timestamp and vests
+        const alreadyExists = existingData[delegator].some(entry =>
+          entry.timestamp === timestamp && entry.vests === vests
+        );
+        if (!alreadyExists) {
+          existingData[delegator].push({
+            vests,
+            hp: parseFloat(hp.toFixed(3)),
+            timestamp
+          });
+        }
       }
     }
   }
 
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(delegations, null, 2));
-  console.log(`✅ delegation_history.json written with ${Object.keys(delegations).length} delegators.`);
+  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(existingData, null, 2));
+  console.log(`✅ delegation_history.json updated with ${Object.keys(existingData).length} delegators.`);
 }
 
 fetchDelegationHistory().catch(console.error);
