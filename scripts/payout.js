@@ -11,6 +11,7 @@ const REWARD_CACHE_FILE = 'ui/reward_cache.json';
 const PAYOUT_LOG_FILE = 'ui/payout.log';
 const DELEGATION_HISTORY_FILE = 'delegation_history.json';
 const MIN_PAYOUT = 0.001;
+const IS_DRY_RUN = true; // 🔁 Set to false for real payouts
 
 const API_NODES = [
   'https://api.hive.blog',
@@ -178,6 +179,11 @@ async function sendPayout(to, amount) {
 
   const memo = `Thank you for your delegation to @${HIVE_USER} — ${phDate}`;
 
+  if (IS_DRY_RUN) {
+    console.log(`🧪 DRY-RUN: Would send ${amount.toFixed(3)} HIVE to @${to} — ${memo}`);
+    return Promise.resolve();
+  }
+
   return new Promise((resolve, reject) => {
     hive.broadcast.transfer(
       ACTIVE_KEY,
@@ -237,7 +243,7 @@ async function distributeRewards() {
   const retained = totalCurationHive * 0.05;
   const distributable = totalCurationHive * 0.95;
 
-  // Updated delegation cutoff: Midnight 7 days ago PH time
+  // Use calendar-day-based 7-day cutoff
   const phTz = 'Asia/Manila';
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
   now.setHours(0, 0, 0, 0);
