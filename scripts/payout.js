@@ -243,7 +243,6 @@ async function distributeRewards() {
   const retained = totalCurationHive * 0.05;
   const distributable = totalCurationHive * 0.95;
 
-  // Use calendar-day-based 6-day cutoff
   const phTz = 'Asia/Manila';
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
   now.setHours(0, 0, 0, 0);
@@ -270,17 +269,28 @@ async function distributeRewards() {
   for (const [delegator, eligibleVests] of Object.entries(eligibleDelegators)) {
     const share = eligibleVests / eligibleTotal;
     const payout = distributable * share;
-    rewardCache[delegator] = (rewardCache[delegator] || 0) + payout;
+
+    rewardCache[delegator] = parseFloat(((rewardCache[delegator] || 0) + payout).toFixed(10));
 
     if (rewardCache[delegator] >= MIN_PAYOUT) {
-      await sendPayout(delegator, rewardCache[delegator]);
-      rewardCache[delegator] = 0;
+      const amountToSend = parseFloat(rewardCache[delegator].toFixed(3));
+      const remainder = parseFloat((rewardCache[delegator] - amountToSend).toFixed(10));
+
+      await sendPayout(delegator, amountToSend);
+      rewardCache[delegator] = remainder;
+
+      console.log(`🧾 Sent ${amountToSend.toFixed(3)} HIVE to @${delegator}, remainder kept: ${remainder.toFixed(10)} HIVE`);
     } else {
-      console.log(`📦 Stored for @${delegator}: ${rewardCache[delegator].toFixed(6)} HIVE`);
+      console.log(`📦 Stored for @${delegator}: ${rewardCache[delegator].toFixed(10)} HIVE`);
     }
   }
 
-  saveRewardCache(rewardCache);
+  const roundedCache = {};
+  for (const [k, v] of Object.entries(rewardCache)) {
+    roundedCache[k] = parseFloat(v.toFixed(10));
+  }
+
+  saveRewardCache(roundedCache);
   logPayout(new Date().toISOString(), totalCurationHive);
   console.log(`🏁 Done. 95% distributed, 5% retained (~${retained.toFixed(6)} HIVE).`);
 }
