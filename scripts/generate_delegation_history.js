@@ -1,84 +1,68 @@
-const fs = require("fs");
-const dhive = require("@hiveio/hive-js");
-require("dotenv").config();
+require('dotenv').config();
+const fs = require('fs');
+const dhive = require('@hiveio/dhive');
 
-const ACCOUNT = process.env.HIVE_USER || 'bayanihive';
-const HISTORY_FILE = "scripts/delegation_history.json";
-const CANDIDATES_FILE = "scripts/delegator_candidates.json";
-const now = new Date().toISOString();
+const HISTORY_FILE = 'delegation_history.json';
+const DELEGATOR_CANDIDATES_FILE = 'delegator_candidates.json';
+const client = new dhive.Client(process.env.HIVE_API || 'https://api.hive.blog');
 
-async function vestsToHP(vests) {
-  const globals = await dhive.api.getDynamicGlobalPropertiesAsync();
-  const totalVestingShares = parseFloat(globals.total_vesting_shares);
-  const totalVestingFundHive = parseFloat(globals.total_vesting_fund_hive);
-  return vests * totalVestingFundHive / totalVestingShares;
+const account = process.env.HIVE_USER;
+
+async function main() {
+  console.log(`🔍 Checking delegations TO @${account}...`);
+
+  // Load existing history or initialize empty
+  let existing = {};
+  if (fs.existsSync(HISTORY_FILE)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(HISTORY_FILE));
+    } catch (e) {
+      console.warn("⚠️ Failed to read delegation_history.json, initializing empty.");
+      existing = {};
+    }
+  }
+
+  const candidates = JSON.parse(fs.readFileSync(DELEGATOR_CANDIDATES_FILE));
+  const now = Date.now();
+  let updated = false;
+  let count = 0;
+
+  for (const delegator of candidates) {
+    try {
+      const [vestingDelegations] = await client.call('database_api', 'find_vesting_delegations', {
+        account: delegator,
+        start: account,
+        limit: 1
+      });
+
+      const delegation = vestingDelegations.delegations?.[0];
+      const isDelegatingToUs = delegation && delegation.delegatee === account;
+
+      if (isDelegatingToUs) {
+        if (!existing[delegator]) {
+          existing[delegator] = [
+            { start_timestamp: now }
+          ];
+          updated = true;
+          console.log(`✅ New delegation from @${delegator} recorded.`);
+        } else {
+          // Already tracked
+          // You can optionally check if amount changed and record new entry
+        }
+        count++;
+      }
+    } catch (err) {
+      console.warn(`⚠️ Error checking @${delegator}: ${err.message}`);
+    }
+  }
+
+  // Write even if nothing changed but file was empty
+  if (updated || Object.keys(existing).length === 0) {
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(existing, null, 2));
+    console.log(`✅ delegation_history.json written/updated with ${count} delegators.`);
+  } else {
+    console.log("🟡 No new delegations found. File untouched.");
+  }
 }
 
-(async () => {
-  try {
-    console.log(`🔍 Checking delegations TO @${ACCOUNT}...`);
-
-    const candidates = fs.existsSync(CANDIDATES_FILE)
-      ? JSON.parse(fs.readFileSync(CANDIDATES_FILE))
-      : null;
-
-    const delegators = {};
-    let start = '';
-    let done = false;
-
-    while (!done) {
-      const delegations = await dhive.api.getVestingDelegationsAsync(ACCOUNT, start, 100);
-      if (delegations.length === 0) break;
-
-      for (const d of delegations) {
-        const delegator = d.delegator;
-        if (candidates && !candidates.includes(delegator)) continue;
-
-        const amount = parseFloat(d.vesting_shares.split(" ")[0]);
-        const hp = await vestsToHP(amount);
-
-        if (!delegators[delegator]) delegators[delegator] = [];
-        delegators[delegator].push({
-          amount: parseFloat(hp.toFixed(3)),
-          timestamp: now
-        });
-
-        start = delegator;
-      }
-
-      done = delegations.length < 100;
-    }
-
-    let existing = {};
-    if (fs.existsSync(HISTORY_FILE)) {
-      existing = JSON.parse(fs.readFileSync(HISTORY_FILE));
-    }
-
-    let updated = false;
-    for (const [name, records] of Object.entries(delegators)) {
-      if (!existing[name]) {
-        existing[name] = records;
-        updated = true;
-      } else {
-        for (const record of records) {
-          const duplicate = existing[name].some(r => Math.abs(r.amount - record.amount) < 0.001);
-          if (!duplicate) {
-            existing[name].push(record);
-            updated = true;
-          }
-        }
-      }
-    }
-
-    if (updated) {
-      fs.writeFileSync(HISTORY_FILE, JSON.stringify(existing, null, 2));
-      console.log("✅ delegation_history.json updated.");
-    } else {
-      console.log("🟡 No new delegations found. File untouched.");
-    }
-
-  } catch (err) {
-    console.error("❌ Error:", err.message);
-    process.exit(1);
-  }
-})();
+main().catch(console.error);
