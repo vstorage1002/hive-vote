@@ -6,7 +6,7 @@ require('dotenv').config();
 const HIVE_USER = process.env.HIVE_USER;
 const OUTPUT_FILE = path.join(__dirname, 'delegation_history.json');
 
-// Helper to convert VESTS to HP
+// Convert VESTS to HP
 function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
   return (vests * totalVestingFundHive) / totalVestingShares;
 }
@@ -52,7 +52,7 @@ async function fetchDelegationHistory() {
       const timestamp = new Date(op.timestamp + 'Z').getTime();
       const vests = parseFloat(vesting_shares);
 
-      if (delegatee === HIVE_USER && vests > 0) {
+      if (delegatee === HIVE_USER) {
         const hp = vestsToHP(vests, totalVestingFundHive, totalVestingShares);
         if (!delegations[delegator]) delegations[delegator] = [];
         delegations[delegator].push({
