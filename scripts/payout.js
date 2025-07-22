@@ -134,8 +134,15 @@ async function fetchFullDelegationHistory() {
 async function getCurationRewards() {
   const phTz = 'Asia/Manila';
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
-  now.setHours(0, 0, 0, 0);
-  const fromTime = now.getTime() - 24 * 60 * 60 * 1000;
+
+  const end = new Date(now);
+  end.setHours(8, 0, 0, 0); // Today 8:00 AM
+
+  const start = new Date(end);
+  start.setDate(start.getDate() - 1); // Yesterday 8:00 AM
+
+  const fromTime = start.getTime();
+  const toTime = end.getTime();
 
   const history = await new Promise((resolve, reject) => {
     hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, res) => {
@@ -148,13 +155,15 @@ async function getCurationRewards() {
   for (const [, op] of history) {
     if (op.op[0] === 'curation_reward') {
       const opTime = new Date(op.timestamp + 'Z').getTime();
-      if (opTime >= fromTime && opTime < now.getTime()) {
+      if (opTime >= fromTime && opTime < toTime) {
         totalVests += parseFloat(op.op[1].reward);
       }
     }
   }
+
   return totalVests;
 }
+
 
 async function getDynamicProps() {
   return new Promise((resolve, reject) => {
