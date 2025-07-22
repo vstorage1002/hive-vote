@@ -2,7 +2,7 @@ name: Hive Payout
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # Runs daily at 9:00 AM Asia/Manila (UTC+8)
+    - cron: '0 1 * * *'  # Runs every day at 9:00 AM Asia/Manila (UTC+8)
   workflow_dispatch:
 
 permissions:
@@ -44,23 +44,10 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           FILES_TO_COMMIT=""
-
-          if [ -f ui/reward_cache.json ]; then
-            FILES_TO_COMMIT="$FILES_TO_COMMIT ui/reward_cache.json"
-          fi
-          if [ -f ui/payout.log ]; then
-            FILES_TO_COMMIT="$FILES_TO_COMMIT ui/payout.log"
-          fi
-          if [ -f ui/curation_breakdown.log ]; then
-            FILES_TO_COMMIT="$FILES_TO_COMMIT ui/curation_breakdown.log"
-          fi
-          if [ -f delegation_snapshot.json ]; then
-            FILES_TO_COMMIT="$FILES_TO_COMMIT delegation_snapshot.json"
-          fi
-          if [ -f scripts/delegation_history.json ]; then
-            FILES_TO_COMMIT="$FILES_TO_COMMIT scripts/delegation_history.json"
-          fi
-
+          if [ -f ui/reward_cache.json ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT ui/reward_cache.json"; fi
+          if [ -f ui/payout.log ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT ui/payout.log"; fi
+          if [ -f delegation_snapshot.json ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT delegation_snapshot.json"; fi
+          if [ -f scripts/delegation_history.json ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT scripts/delegation_history.json"; fi
           if [ -n "$FILES_TO_COMMIT" ]; then
             git add $FILES_TO_COMMIT
             git commit -m "🤖 Update reward data and logs [auto]" || echo "No changes to commit"
