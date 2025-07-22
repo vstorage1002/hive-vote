@@ -2,126 +2,148 @@
   "gretelarmfeg": [
     {
       "vests": 333435.360703,
+      "hp": 200.264,
       "timestamp": 1751780673000
     },
     {
       "vests": 499600.395373,
+      "hp": 300.064,
       "timestamp": 1752949974000
     },
     {
       "vests": 999157.774517,
+      "hp": 600.102,
       "timestamp": 1752996447000
     }
   ],
   "anlizapasaje1234": [
     {
       "vests": 83357.946285,
+      "hp": 50.065,
       "timestamp": 1751790753000
     }
   ],
   "honeyjean24": [
     {
       "vests": 16668.844202,
+      "hp": 10.011,
       "timestamp": 1751964294000
     }
   ],
   "jeanieviv84": [
     {
       "vests": 333346.252729,
+      "hp": 200.21,
       "timestamp": 1752060468000
     }
   ],
   "diosarich": [
     {
       "vests": 83329.266961,
+      "hp": 50.048,
       "timestamp": 1752148611000
     },
     {
       "vests": 166539.701661,
+      "hp": 100.025,
       "timestamp": 1752909372000
     }
   ],
   "vinzie1": [
     {
       "vests": 833226.585115,
+      "hp": 500.442,
       "timestamp": 1752232194000
     }
   ],
   "wanderelle": [
     {
       "vests": 16660.781594,
+      "hp": 10.007,
       "timestamp": 1752470193000
     }
   ],
   "krissymayol": [
     {
       "vests": 16660.769611,
+      "hp": 10.007,
       "timestamp": 1752471174000
     }
   ],
   "desyah07": [
     {
       "vests": 66637.17772,
+      "hp": 40.023,
       "timestamp": 1752565869000
     }
   ],
   "gracefulwrites": [
     {
       "vests": 49977.244684,
+      "hp": 30.017,
       "timestamp": 1752579612000
     }
   ],
   "katiekate86": [
     {
       "vests": 166589.041612,
+      "hp": 100.055,
       "timestamp": 1752591936000
     }
   ],
   "celestyne15": [
     {
       "vests": 33311.009883,
+      "hp": 20.007,
       "timestamp": 1752809952000
     }
   ],
   "antonette": [
     {
       "vests": 166539.692367,
+      "hp": 100.025,
       "timestamp": 1752909528000
     }
   ],
   "superkristhel": [
     {
       "vests": 83265.157417,
+      "hp": 50.01,
       "timestamp": 1752970080000
     }
   ],
   "hopefulsoul": [
     {
       "vests": 66610.729562,
+      "hp": 40.007,
       "timestamp": 1752992961000
     }
   ],
   "ronimarie82": [
     {
       "vests": 83263.333791,
+      "hp": 50.009,
       "timestamp": 1752993756000
     }
   ],
   "dreamrona": [
     {
       "vests": 66610.282171,
+      "hp": 40.007,
       "timestamp": 1753000971000
     }
   ],
   "luthis26": [
     {
       "vests": 166523.838941,
+      "hp": 100.016,
       "timestamp": 1753014159000
     }
   ],
   "izyllah-aeon": [
     {
       "vests": 83256.447915,
+      "hp": 50.004,
       "timestamp": 1753083648000
     }
   ]
