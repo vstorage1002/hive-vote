@@ -131,11 +131,10 @@ async function fetchFullDelegationHistory() {
 }
 
 async function getCurationRewards() {
-  const now = new Date();
   const phTz = 'Asia/Manila';
-  const today8AM = new Date(now.toLocaleString('en-US', { timeZone: phTz }));
-  today8AM.setHours(8, 0, 0, 0);
-  const fromTime = today8AM.getTime() - 24 * 60 * 60 * 1000;
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
+  now.setHours(0, 0, 0, 0); // Midnight PH time
+  const fromTime = now.getTime() - 24 * 60 * 60 * 1000; // Midnight yesterday
 
   const history = await new Promise((resolve, reject) => {
     hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, res) => {
@@ -148,7 +147,7 @@ async function getCurationRewards() {
   for (const [, op] of history) {
     if (op.op[0] === 'curation_reward') {
       const opTime = new Date(op.timestamp + 'Z').getTime();
-      if (opTime >= fromTime && opTime < today8AM.getTime()) {
+      if (opTime >= fromTime && opTime < now.getTime()) {
         totalVests += parseFloat(op.op[1].reward);
       }
     }
@@ -237,7 +236,12 @@ async function distributeRewards() {
 
   const retained = totalCurationHive * 0.05;
   const distributable = totalCurationHive * 0.95;
-  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+  // Updated delegation cutoff: Midnight 7 days ago PH time
+  const phTz = 'Asia/Manila';
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
+  now.setHours(0, 0, 0, 0);
+  const cutoff = now.getTime() - 7 * 24 * 60 * 60 * 1000;
 
   let eligibleTotal = 0;
   const eligibleDelegators = {};
