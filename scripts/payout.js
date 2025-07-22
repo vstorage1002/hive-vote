@@ -134,8 +134,8 @@ async function fetchFullDelegationHistory() {
 async function getCurationRewards() {
   const phTz = 'Asia/Manila';
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
-  now.setHours(0, 0, 0, 0); // Midnight PH time
-  const fromTime = now.getTime() - 24 * 60 * 60 * 1000; // Midnight yesterday
+  now.setHours(0, 0, 0, 0);
+  const fromTime = now.getTime() - 24 * 60 * 60 * 1000;
 
   const history = await new Promise((resolve, reject) => {
     hive.api.getAccountHistory(HIVE_USER, -1, 1000, (err, res) => {
@@ -273,13 +273,13 @@ async function distributeRewards() {
     rewardCache[delegator] = parseFloat(((rewardCache[delegator] || 0) + payout).toFixed(10));
 
     if (rewardCache[delegator] >= MIN_PAYOUT) {
-      const amountToSend = parseFloat(rewardCache[delegator].toFixed(3));
+      const amountToSend = Math.floor(rewardCache[delegator] * 1000) / 1000;
       const remainder = parseFloat((rewardCache[delegator] - amountToSend).toFixed(10));
 
       await sendPayout(delegator, amountToSend);
       rewardCache[delegator] = remainder;
 
-      console.log(`🧾 Sent ${amountToSend.toFixed(3)} HIVE to @${delegator}, remainder kept: ${remainder.toFixed(10)} HIVE`);
+      console.log(`📟 Sent ${amountToSend.toFixed(3)} HIVE to @${delegator}, remainder kept: ${remainder.toFixed(10)} HIVE`);
     } else {
       console.log(`📦 Stored for @${delegator}: ${rewardCache[delegator].toFixed(10)} HIVE`);
     }
@@ -292,7 +292,7 @@ async function distributeRewards() {
 
   saveRewardCache(roundedCache);
   logPayout(new Date().toISOString(), totalCurationHive);
-  console.log(`🏁 Done. 95% distributed, 5% retained (~${retained.toFixed(6)} HIVE).`);
+  console.log(`🌟 Done. 95% distributed, 5% retained (~${retained.toFixed(6)} HIVE).`);
 }
 
 distributeRewards().catch(console.error);
