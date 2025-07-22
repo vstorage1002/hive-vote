@@ -243,11 +243,11 @@ async function distributeRewards() {
   const retained = totalCurationHive * 0.05;
   const distributable = totalCurationHive * 0.95;
 
-  // Use calendar-day-based 7-day cutoff
+  // Use calendar-day-based 6-day cutoff
   const phTz = 'Asia/Manila';
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
   now.setHours(0, 0, 0, 0);
-  const cutoff = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+  const cutoff = now.getTime() - 6 * 24 * 60 * 60 * 1000;
 
   let eligibleTotal = 0;
   const eligibleDelegators = {};
