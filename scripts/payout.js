@@ -11,7 +11,7 @@ const REWARD_CACHE_FILE = 'ui/reward_cache.json';
 const PAYOUT_LOG_FILE = 'ui/payout.log';
 const DELEGATION_HISTORY_FILE = 'delegation_history.json';
 const MIN_PAYOUT = 0.001;
-const IS_DRY_RUN = true; // 🔁 Set to false for real payouts : SET TO TRUE FOR DRY RUN TESTING
+const IS_DRY_RUN = false; // 🔁 Set to false for real payouts : SET TO TRUE FOR DRY RUN TESTING
 
 const API_NODES = [
   'https://api.hive.blog',
