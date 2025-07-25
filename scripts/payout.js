@@ -11,7 +11,7 @@ const REWARD_CACHE_FILE = 'ui/reward_cache.json';
 const PAYOUT_LOG_FILE = 'ui/payout.log';
 const DELEGATION_HISTORY_FILE = 'delegation_history.json';
 const MIN_PAYOUT = 0.001;
-const IS_DRY_RUN = false; // 🔁 Set to false for real payouts : SET TO TRUE FOR DRY RUN TESTING
+const IS_DRY_RUN = false;
 
 const API_NODES = [
   'https://api.hive.blog',
@@ -136,10 +136,10 @@ async function getCurationRewards() {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
 
   const end = new Date(now);
-  end.setHours(8, 0, 0, 0); // Today 8:00 AM
+  end.setHours(8, 0, 0, 0);
 
   const start = new Date(end);
-  start.setDate(start.getDate() - 1); // Yesterday 8:00 AM
+  start.setDate(start.getDate() - 1);
 
   const fromTime = start.getTime();
   const toTime = end.getTime();
@@ -172,7 +172,7 @@ async function getCurationRewards() {
         break;
       }
 
-      startIndex = index - 1; // Move further back
+      startIndex = index - 1;
     }
 
     if (history.length < limit) break;
@@ -180,8 +180,6 @@ async function getCurationRewards() {
 
   return totalVests;
 }
-
-
 
 async function getDynamicProps() {
   return new Promise((resolve, reject) => {
@@ -295,20 +293,22 @@ async function distributeRewards() {
 
   for (const [delegator, eligibleVests] of Object.entries(eligibleDelegators)) {
     const share = eligibleVests / eligibleTotal;
-    const payout = distributable * share;
+    const todayReward = distributable * share;
 
-    rewardCache[delegator] = parseFloat(((rewardCache[delegator] || 0) + payout).toFixed(10));
+    const previousUnpaid = rewardCache[delegator] || 0;
+    const totalReward = parseFloat((previousUnpaid + todayReward).toFixed(10));
 
-    if (rewardCache[delegator] >= MIN_PAYOUT) {
-      const amountToSend = Math.floor(rewardCache[delegator] * 1000) / 1000;
-      const remainder = parseFloat((rewardCache[delegator] - amountToSend).toFixed(10));
+    if (totalReward >= MIN_PAYOUT) {
+      const amountToSend = Math.floor(totalReward * 1000) / 1000;
+      const remainder = parseFloat((totalReward - amountToSend).toFixed(10));
 
       await sendPayout(delegator, amountToSend);
       rewardCache[delegator] = remainder;
 
       console.log(`📟 Sent ${amountToSend.toFixed(3)} HIVE to @${delegator}, remainder kept: ${remainder.toFixed(10)} HIVE`);
     } else {
-      console.log(`📦 Stored for @${delegator}: ${rewardCache[delegator].toFixed(10)} HIVE`);
+      rewardCache[delegator] = totalReward;
+      console.log(`📦 Stored for @${delegator}: ${totalReward.toFixed(10)} HIVE`);
     }
   }
 
