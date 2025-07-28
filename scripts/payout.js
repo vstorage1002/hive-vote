@@ -80,23 +80,42 @@ async function fetchFullDelegationHistory() {
       resolve(res[0][0]);
     });
   });
-  let limit = 1000;
-  let start = Math.max(latestIndex, limit - 1);
-
+  
   const rawHistory = [];
-
-  while (true) {
+  
+  // If account has fewer than 1000 operations, get them all at once
+  if (latestIndex < 999) {
     const history = await new Promise((resolve, reject) => {
-      hive.api.getAccountHistory(HIVE_USER, start, limit, (err, res) => {
+      hive.api.getAccountHistory(HIVE_USER, -1, latestIndex + 1, (err, res) => {
         if (err) return reject(err);
         resolve(res);
       });
     });
+    if (history && history.length > 0) {
+      rawHistory.push(...history);
+    }
+  } else {
+    // Account has 1000+ operations, use the original pagination logic
+    let limit = 1000;
+    let start = latestIndex;
 
-    if (!history || history.length === 0) break;
-    rawHistory.push(...history);
-    start = history[0][0] - 1;
-    if (history.length < limit) break;
+    while (true) {
+      const history = await new Promise((resolve, reject) => {
+        hive.api.getAccountHistory(HIVE_USER, start, limit, (err, res) => {
+          if (err) return reject(err);
+          resolve(res);
+        });
+      });
+
+      if (!history || history.length === 0) break;
+      rawHistory.push(...history);
+      
+      const nextStart = history[0][0] - 1;
+      if (nextStart < 0) break;
+      
+      start = nextStart;
+      if (history.length < limit) break;
+    }
   }
 
   const delegations = [];
@@ -157,39 +176,66 @@ async function getCurationRewards() {
       resolve(res[0][0]);
     });
   });
-  let limit = 1000;
-  let startIndex = Math.max(latestIndex, limit - 1);
 
   let totalVests = 0;
-  let done = false;
-
-  while (!done) {
+  
+  // If account has fewer than 1000 operations, get them all at once
+  if (latestIndex < 999) {
     const history = await new Promise((resolve, reject) => {
-      hive.api.getAccountHistory(HIVE_USER, startIndex, limit, (err, res) => {
+      hive.api.getAccountHistory(HIVE_USER, -1, latestIndex + 1, (err, res) => {
         if (err) return reject(err);
         resolve(res);
       });
     });
+    
+    if (history && history.length > 0) {
+      for (const [index, op] of history) {
+        const { timestamp, op: [type, data] } = op;
+        const opTime = new Date(timestamp + 'Z').getTime();
 
-    if (!history || history.length === 0) break;
-
-    for (const [index, op] of history.reverse()) {
-      const { timestamp, op: [type, data] } = op;
-      const opTime = new Date(timestamp + 'Z').getTime();
-
-      if (type === 'curation_reward' && opTime >= fromTime && opTime < toTime) {
-        totalVests += parseFloat(data.reward);
+        if (type === 'curation_reward' && opTime >= fromTime && opTime < toTime) {
+          totalVests += parseFloat(data.reward);
+        }
       }
-
-      if (opTime < fromTime) {
-        done = true;
-        break;
-      }
-
-      startIndex = index - 1;
     }
+  } else {
+    // Account has 1000+ operations, use pagination
+    let limit = 1000;
+    let startIndex = latestIndex;
+    let done = false;
 
-    if (history.length < limit) break;
+    while (!done) {
+      const history = await new Promise((resolve, reject) => {
+        hive.api.getAccountHistory(HIVE_USER, startIndex, limit, (err, res) => {
+          if (err) return reject(err);
+          resolve(res);
+        });
+      });
+
+      if (!history || history.length === 0) break;
+
+      for (const [index, op] of history.reverse()) {
+        const { timestamp, op: [type, data] } = op;
+        const opTime = new Date(timestamp + 'Z').getTime();
+
+        if (type === 'curation_reward' && opTime >= fromTime && opTime < toTime) {
+          totalVests += parseFloat(data.reward);
+        }
+
+        if (opTime < fromTime) {
+          done = true;
+          break;
+        }
+
+        startIndex = index - 1;
+        if (startIndex < 0) {
+          done = true;
+          break;
+        }
+      }
+
+      if (history.length < limit) break;
+    }
   }
 
   return totalVests;
