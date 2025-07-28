@@ -74,14 +74,14 @@ function saveDelegationHistory(data) {
 }
 
 async function fetchFullDelegationHistory() {
-  const limit = 1000;
   let latestIndex = await new Promise((resolve, reject) => {
     hive.api.getAccountHistory(HIVE_USER, -1, 1, (err, res) => {
       if (err) return reject(err);
       resolve(res[0][0]);
     });
   });
-  let start = latestIndex;
+  let limit = 1000;
+  let start = Math.max(latestIndex, limit - 1);
 
   const rawHistory = [];
 
@@ -151,15 +151,15 @@ async function getCurationRewards() {
   const fromTime = start.getTime();
   const toTime = end.getTime();
 
-  const limit = 1000;
   let latestIndex = await new Promise((resolve, reject) => {
     hive.api.getAccountHistory(HIVE_USER, -1, 1, (err, res) => {
       if (err) return reject(err);
       resolve(res[0][0]);
     });
   });
+  let limit = 1000;
+  let startIndex = Math.max(latestIndex, limit - 1);
 
-  let startIndex = latestIndex;
   let totalVests = 0;
   let done = false;
 
