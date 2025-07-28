@@ -95,13 +95,16 @@ async function fetchFullDelegationHistory() {
       rawHistory.push(...history);
     }
   } else {
-    // Account has 1000+ operations, use the original pagination logic
+    // Account has 1000+ operations, use pagination with proper start/limit validation
     let limit = 1000;
     let start = latestIndex;
 
     while (true) {
+      // Ensure start >= limit-1 as required by Hive API
+      const adjustedStart = Math.max(start, limit - 1);
+      
       const history = await new Promise((resolve, reject) => {
-        hive.api.getAccountHistory(HIVE_USER, start, limit, (err, res) => {
+        hive.api.getAccountHistory(HIVE_USER, adjustedStart, limit, (err, res) => {
           if (err) return reject(err);
           resolve(res);
         });
@@ -110,8 +113,24 @@ async function fetchFullDelegationHistory() {
       if (!history || history.length === 0) break;
       rawHistory.push(...history);
       
+      // Calculate next start position
       const nextStart = history[0][0] - 1;
-      if (nextStart < 0) break;
+      if (nextStart < 0 || nextStart < limit - 1) {
+        // If we can't maintain start >= limit-1, get remaining entries with smaller limit
+        if (nextStart >= 0) {
+          const remainingLimit = nextStart + 1;
+          const remainingHistory = await new Promise((resolve, reject) => {
+            hive.api.getAccountHistory(HIVE_USER, nextStart, remainingLimit, (err, res) => {
+              if (err) return reject(err);
+              resolve(res);
+            });
+          });
+          if (remainingHistory && remainingHistory.length > 0) {
+            rawHistory.push(...remainingHistory);
+          }
+        }
+        break;
+      }
       
       start = nextStart;
       if (history.length < limit) break;
@@ -199,14 +218,17 @@ async function getCurationRewards() {
       }
     }
   } else {
-    // Account has 1000+ operations, use pagination
+    // Account has 1000+ operations, use pagination with proper start/limit validation
     let limit = 1000;
     let startIndex = latestIndex;
     let done = false;
 
     while (!done) {
+      // Ensure startIndex >= limit-1 as required by Hive API
+      const adjustedStart = Math.max(startIndex, limit - 1);
+      
       const history = await new Promise((resolve, reject) => {
-        hive.api.getAccountHistory(HIVE_USER, startIndex, limit, (err, res) => {
+        hive.api.getAccountHistory(HIVE_USER, adjustedStart, limit, (err, res) => {
           if (err) return reject(err);
           resolve(res);
         });
@@ -227,11 +249,38 @@ async function getCurationRewards() {
           break;
         }
 
-        startIndex = index - 1;
-        if (startIndex < 0) {
+        const nextIndex = index - 1;
+        if (nextIndex < 0 || nextIndex < limit - 1) {
+          // If we can't maintain start >= limit-1, get remaining entries with smaller limit
+          if (nextIndex >= 0) {
+            const remainingLimit = nextIndex + 1;
+            const remainingHistory = await new Promise((resolve, reject) => {
+              hive.api.getAccountHistory(HIVE_USER, nextIndex, remainingLimit, (err, res) => {
+                if (err) return reject(err);
+                resolve(res);
+              });
+            });
+            if (remainingHistory && remainingHistory.length > 0) {
+              for (const [rIndex, rOp] of remainingHistory.reverse()) {
+                const { timestamp: rTimestamp, op: [rType, rData] } = rOp;
+                const rOpTime = new Date(rTimestamp + 'Z').getTime();
+
+                if (rType === 'curation_reward' && rOpTime >= fromTime && rOpTime < toTime) {
+                  totalVests += parseFloat(rData.reward);
+                }
+
+                if (rOpTime < fromTime) {
+                  done = true;
+                  break;
+                }
+              }
+            }
+          }
           done = true;
           break;
         }
+        
+        startIndex = nextIndex;
       }
 
       if (history.length < limit) break;
