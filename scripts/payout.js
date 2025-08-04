@@ -348,6 +348,53 @@ function logPayout(dateStr, totalHive) {
   fs.appendFileSync(PAYOUT_LOG_FILE, line);
 }
 
+// FIXED FUNCTION: Calculate eligible delegation amounts properly
+function calculateEligibleDelegation(delegationHistory, cutoffTime) {
+  const eligibleDelegators = {};
+  
+  for (const [delegator, chunks] of Object.entries(delegationHistory)) {
+    // Sort chunks by timestamp to process them chronologically
+    const sortedChunks = [...chunks].sort((a, b) => a.timestamp - b.timestamp);
+    
+    let eligibleVests = 0;
+    let runningBalance = 0;
+    
+    console.log(`\n🔍 Processing ${delegator}:`);
+    
+    // Process each delegation chunk chronologically
+    for (let i = 0; i < sortedChunks.length; i++) {
+      const chunk = sortedChunks[i];
+      const prevBalance = runningBalance;
+      runningBalance += chunk.vests;
+      
+      const chunkDate = new Date(chunk.timestamp).toISOString().split('T')[0];
+      const isEligible = chunk.timestamp <= cutoffTime;
+      
+      console.log(`  📅 ${chunkDate}: ${chunk.vests > 0 ? '+' : ''}${chunk.vests.toFixed(6)} VESTS (Balance: ${runningBalance.toFixed(6)}) ${isEligible ? '✅ Eligible' : '❌ Too recent'}`);
+      
+      if (isEligible) {
+        // This delegation change is eligible (happened 6+ days ago)
+        // The eligible amount is the delegation balance after this operation
+        eligibleVests = Math.max(0, runningBalance);
+      }
+      // If not eligible, we don't update eligibleVests but continue tracking runningBalance
+    }
+    
+    // Ensure eligible amount doesn't exceed current delegation
+    const currentDelegation = Math.max(0, runningBalance);
+    eligibleVests = Math.min(eligibleVests, currentDelegation);
+    
+    if (eligibleVests > 0) {
+      eligibleDelegators[delegator] = eligibleVests;
+      console.log(`  ✅ Final eligible: ${eligibleVests.toFixed(6)} VESTS (Current: ${currentDelegation.toFixed(6)} VESTS)`);
+    } else {
+      console.log(`  ❌ No eligible delegation (either too recent or fully withdrawn)`);
+    }
+  }
+  
+  return eligibleDelegators;
+}
+
 async function distributeRewards() {
   console.log(`🚀 Calculating rewards for @${HIVE_USER}...`);
   await pickWorkingNode();
@@ -382,45 +429,18 @@ async function distributeRewards() {
   now.setHours(0, 0, 0, 0);
   const cutoff = now.getTime() - 6 * 24 * 60 * 60 * 1000;
 
-  let eligibleTotal = 0;
-  const eligibleDelegators = {};
+  console.log(`⏰ Cutoff time: ${new Date(cutoff).toISOString()}`);
+  console.log(`⏰ Current time: ${new Date().toISOString()}`);
 
-  // FIXED DELEGATION CALCULATION
-  for (const [delegator, chunks] of Object.entries(delegationChunks)) {
-    // Sort chunks by timestamp to process them chronologically
-    const sortedChunks = [...chunks].sort((a, b) => a.timestamp - b.timestamp);
-    
-    let eligibleVests = 0;
-    let cumulativeVests = 0;
-    
-    // Process each delegation chunk chronologically
-    for (const chunk of sortedChunks) {
-      cumulativeVests += chunk.vests;
-      
-      if (chunk.timestamp <= cutoff) {
-        // This delegation change happened 6+ days ago, so it's eligible
-        eligibleVests = Math.max(0, cumulativeVests);
-      }
-      // If delegation happened after cutoff, we don't update eligibleVests
-      // but we still need to track cumulativeVests for validation
-    }
-    
-    // Ensure eligible amount doesn't exceed current delegation
-    const currentDelegation = Math.max(0, cumulativeVests);
-    eligibleVests = Math.min(eligibleVests, currentDelegation);
-    
-    if (eligibleVests > 0) {
-      eligibleDelegators[delegator] = eligibleVests;
-      eligibleTotal += eligibleVests;
-      
-      const eligibleHP = vestsToHP(eligibleVests, totalVestingFundHive, totalVestingShares);
-      console.log(`📊 ${delegator}: ${eligibleVests.toFixed(6)} VESTS eligible (${eligibleHP.toFixed(3)} HP)`);
-    } else {
-      console.log(`⏳ ${delegator}: No eligible delegation (either too recent or fully withdrawn)`);
-    }
+  // Use the fixed calculation function
+  const eligibleDelegators = calculateEligibleDelegation(delegationChunks, cutoff);
+
+  let eligibleTotal = 0;
+  for (const vests of Object.values(eligibleDelegators)) {
+    eligibleTotal += vests;
   }
 
-  console.log(`📈 Total eligible delegation: ${vestsToHP(eligibleTotal, totalVestingFundHive, totalVestingShares).toFixed(3)} HP`);
+  console.log(`\n📈 Total eligible delegation: ${vestsToHP(eligibleTotal, totalVestingFundHive, totalVestingShares).toFixed(3)} HP`);
 
   if (eligibleTotal === 0) {
     console.log('⚠️ No eligible delegations found (all delegations are less than 6 days old).');
@@ -429,6 +449,7 @@ async function distributeRewards() {
 
   const rewardCache = loadRewardCache();
 
+  console.log(`\n💰 Reward Distribution:`);
   for (const [delegator, eligibleVests] of Object.entries(eligibleDelegators)) {
     const share = eligibleVests / eligibleTotal;
     const todayReward = distributable * share;
