@@ -393,29 +393,21 @@ async function distributeRewards() {
     let eligibleVests = 0;
     let cumulativeVests = 0;
     
-    // Calculate the cumulative delegation state at the cutoff time
-    // We need to find what the delegation amount was 6+ days ago
+    // Process each delegation chunk chronologically
     for (const chunk of sortedChunks) {
+      cumulativeVests += chunk.vests;
+      
       if (chunk.timestamp <= cutoff) {
-        // This delegation change happened before the cutoff (6+ days ago)
-        cumulativeVests += chunk.vests;
+        // This delegation change happened 6+ days ago, so it's eligible
         eligibleVests = Math.max(0, cumulativeVests);
-      } else {
-        // This delegation change happened after the cutoff (less than 6 days ago)
-        // Stop here - only delegations that existed 6+ days ago are eligible
-        break;
       }
+      // If delegation happened after cutoff, we don't update eligibleVests
+      // but we still need to track cumulativeVests for validation
     }
     
-    // Additional check: if there were any delegation reductions after the cutoff
-    // that affect the current delegation amount, we need to cap the eligible amount
-    let currentCumulativeVests = 0;
-    for (const chunk of sortedChunks) {
-      currentCumulativeVests += chunk.vests;
-    }
-    
-    // The eligible amount cannot exceed the current delegation amount
-    eligibleVests = Math.min(eligibleVests, Math.max(0, currentCumulativeVests));
+    // Ensure eligible amount doesn't exceed current delegation
+    const currentDelegation = Math.max(0, cumulativeVests);
+    eligibleVests = Math.min(eligibleVests, currentDelegation);
     
     if (eligibleVests > 0) {
       eligibleDelegators[delegator] = eligibleVests;
