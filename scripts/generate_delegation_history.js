@@ -62,13 +62,6 @@ async function fetchDelegationHistory() {
 
   const { totalVestingFundHive, totalVestingShares } = await fetchGlobalProps();
   
-  // Load previous history if it exists
-  let existingData = {};
-  if (fs.existsSync(OUTPUT_FILE)) {
-    existingData = JSON.parse(fs.readFileSync(OUTPUT_FILE));
-    console.log(`📁 Loaded existing data for ${Object.keys(existingData).length} delegators`);
-  }
-
   const rawHistory = [];
   
   // If account has fewer than 1000 operations, get them all at once
@@ -144,55 +137,81 @@ async function fetchDelegationHistory() {
 
   console.log(`🔍 Processing ${rawHistory.length} operations for delegation events...`);
 
-  // Process delegation operations
-  let delegationCount = 0;
+  // Process delegation operations - FIXED LOGIC
+  const delegationEvents = [];
+  
   for (const [, op] of rawHistory) {
     if (op.op[0] === 'delegate_vesting_shares') {
       const { delegator, delegatee, vesting_shares } = op.op[1];
       const timestamp = new Date(op.timestamp + 'Z').getTime();
-      const vests = parseFloat(vesting_shares);
+      const totalVests = parseFloat(vesting_shares); // This is the TOTAL delegation amount after this operation
 
       if (delegatee === HIVE_USER) {
-        const hp = vestsToHP(vests, totalVestingFundHive, totalVestingShares);
+        const hp = vestsToHP(totalVests, totalVestingFundHive, totalVestingShares);
         
-        if (!existingData[delegator]) existingData[delegator] = [];
-        
-        // Avoid duplicates by checking timestamp and vests
-        const alreadyExists = existingData[delegator].some(entry =>
-          entry.timestamp === timestamp && entry.vests === vests
-        );
-        
-        if (!alreadyExists) {
-          existingData[delegator].push({
-            vests,
-            hp: parseFloat(hp.toFixed(3)),
-            timestamp,
-            date: new Date(timestamp).toISOString().split('T')[0]
-          });
-          delegationCount++;
-        }
+        delegationEvents.push({
+          delegator,
+          totalVests, // Store total delegation amount
+          hp: parseFloat(hp.toFixed(3)),
+          timestamp,
+          date: new Date(timestamp).toISOString().split('T')[0]
+        });
       }
     }
   }
 
-  // Sort each delegator's history by timestamp
-  for (const delegator in existingData) {
-    existingData[delegator].sort((a, b) => a.timestamp - b.timestamp);
+  // Sort all events by timestamp
+  delegationEvents.sort((a, b) => a.timestamp - b.timestamp);
+
+  // Group by delegator and calculate changes
+  const delegationHistory = {};
+  
+  for (const event of delegationEvents) {
+    const { delegator, totalVests, hp, timestamp, date } = event;
+    
+    if (!delegationHistory[delegator]) {
+      delegationHistory[delegator] = [];
+    }
+    
+    // Get the previous delegation amount for this delegator
+    const previousEvents = delegationHistory[delegator];
+    const previousTotal = previousEvents.length > 0 
+      ? previousEvents[previousEvents.length - 1].totalVests 
+      : 0;
+    
+    // Calculate the change (delta)
+    const deltaVests = totalVests - previousTotal;
+    
+    // Only add if there's actually a change
+    if (Math.abs(deltaVests) > 0.000001) { // Use small threshold to avoid floating point issues
+      delegationHistory[delegator].push({
+        vests: deltaVests, // Store the CHANGE amount
+        totalVests, // Also store total for reference
+        hp: parseFloat(hp.toFixed(3)),
+        timestamp,
+        date
+      });
+      
+      console.log(`📝 ${delegator}: ${deltaVests > 0 ? '+' : ''}${deltaVests.toFixed(6)} VESTS (Total: ${totalVests.toFixed(6)} VESTS, ${hp} HP) on ${date}`);
+    }
   }
 
   // Save the updated history
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(existingData, null, 2));
+  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(delegationHistory, null, 2));
   
   console.log(`✅ delegation_history.json updated!`);
-  console.log(`👥 Total delegators: ${Object.keys(existingData).length}`);
-  console.log(`📋 Total delegation events: ${delegationCount} new events processed`);
+  console.log(`👥 Total delegators: ${Object.keys(delegationHistory).length}`);
   
   // Show summary
   console.log(`\n📊 Summary by delegator:`);
-  for (const [delegator, events] of Object.entries(existingData)) {
-    const latestEvent = events[events.length - 1];
-    const currentHP = latestEvent.hp;
-    console.log(`  ${delegator}: ${events.length} events, current: ${currentHP} HP`);
+  for (const [delegator, events] of Object.entries(delegationHistory)) {
+    let runningTotal = 0;
+    console.log(`\n  ${delegator}:`);
+    for (const event of events) {
+      runningTotal += event.vests;
+      const hp = vestsToHP(runningTotal, totalVestingFundHive, totalVestingShares);
+      console.log(`    ${event.date}: ${event.vests > 0 ? '+' : ''}${event.vests.toFixed(6)} VESTS (Running total: ${runningTotal.toFixed(6)} VESTS, ${hp.toFixed(3)} HP)`);
+    }
   }
 }
 
