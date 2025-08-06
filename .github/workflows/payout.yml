@@ -31,6 +31,7 @@ jobs:
         run: node scripts/generate_delegation_history.js
         env:
           HIVE_USER: ${{ secrets.HIVE_USER }}
+          DELEGATION_WEBHOOK_URL: ${{ secrets.DELEGATION_WEBHOOK_URL }}  # ✅ Add this line
 
       - name: Run payout script
         run: node scripts/payout.js
