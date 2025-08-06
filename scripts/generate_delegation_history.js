@@ -255,3 +255,6 @@ if (summary.length > 1900) {
 }
 
 sendToWebhook(summary);
+}
+  // 👇 Add this to call the function
+fetchDelegationHistory();
