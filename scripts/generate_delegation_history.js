@@ -224,27 +224,34 @@ async function fetchDelegationHistory() {
   console.log(`👥 Total delegators: ${Object.keys(delegationHistory).length}`);
 
   console.log(`\n📊 Summary by delegator:`);
-  let summary = `📢 Delegation Update for @${HIVE_USER}:\n`;
-  summary += `👥 Total delegators: ${Object.keys(delegationHistory).length}\n`;
 
-  for (const [delegator, events] of Object.entries(delegationHistory)) {
-    let runningTotal = 0;
-    console.log(`\n  ${delegator}:`);
-    for (const event of events) {
-      runningTotal += event.vests;
-      const hp = vestsToHP(runningTotal, totalVestingFundHive, totalVestingShares);
-      console.log(`    ${event.date}: ${event.vests > 0 ? '+' : ''}${event.vests.toFixed(6)} VESTS (Running total: ${runningTotal.toFixed(6)} VESTS, ${hp.toFixed(3)} HP)`);
-    }
+let summary = `📢 Delegation Update for @${HIVE_USER}:\n`;
+summary += `👥 Total delegators: ${Object.keys(delegationHistory).length}\n\n`;
 
-    const latest = events[events.length - 1];
-    summary += `• ${delegator}: ${latest.hp} HP (as of ${latest.date})\n`;
-  }
+const latestDelegations = [];
+let totalHP = 0;
 
-  if (summary.length > 1900) {
-    summary = summary.slice(0, 1900) + '\n...truncated';
-  }
-
-  sendToWebhook(summary);
+for (const [delegator, events] of Object.entries(delegationHistory)) {
+  const latest = events[events.length - 1];
+  latestDelegations.push({
+    delegator,
+    hp: latest.hp,
+  });
+  totalHP += latest.hp;
 }
 
-fetchDelegationHistory().catch(console.error);
+// Sort by HP descending
+latestDelegations.sort((a, b) => b.hp - a.hp);
+
+for (const { delegator, hp } of latestDelegations) {
+  const percent = ((hp / totalHP) * 100).toFixed(2);
+  summary += `(${percent}%) ${delegator}: ${hp.toFixed(3)} HP\n`;
+}
+
+summary += `\n📈 Total received: ${totalHP.toFixed(3)} HP`;
+
+if (summary.length > 1900) {
+  summary = summary.slice(0, 1900) + '\n...truncated';
+}
+
+sendToWebhook(summary);
