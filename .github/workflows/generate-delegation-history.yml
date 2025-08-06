@@ -9,6 +9,7 @@ jobs:
 
     env:
       HIVE_USER: ${{ secrets.HIVE_USER }}  # 🔒 Set in GitHub Secrets
+      DELEGATION_WEBHOOK_URL: ${{ secrets.DELEGATION_WEBHOOK_URL }}  # ✅ Add this line
 
     steps:
       - name: 📥 Checkout repository
