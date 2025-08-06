@@ -5,7 +5,7 @@ const https = require('https');
 require('dotenv').config();
 
 const HIVE_USER = process.env.HIVE_USER;
-const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
+const WEBHOOK_URL = process.env.DELEGATION_WEBHOOK_URL;
 
 const OUTPUT_FILE = path.join(__dirname, 'delegation_history.json');
 
