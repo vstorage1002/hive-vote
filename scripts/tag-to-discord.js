@@ -5,7 +5,7 @@ require('dotenv').config();
 
 const TAG_TO_TRACK = 'photography';
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
-const CACHE_FILE = 'latest_post.json';
+const CACHE_FILE = 'scripts/latest_post.json';
 const POST_LIMIT = 20;
 const DELAY_MS = 10000; // 10 seconds
 
