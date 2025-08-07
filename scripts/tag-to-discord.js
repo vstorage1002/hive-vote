@@ -11,8 +11,13 @@ const DELAY_MS = 10000; // 10 seconds
 
 function loadLastPermlink() {
   if (fs.existsSync(CACHE_FILE)) {
-    const data = JSON.parse(fs.readFileSync(CACHE_FILE));
-    return data.permlink || null;
+    try {
+      const data = JSON.parse(fs.readFileSync(CACHE_FILE));
+      return data.permlink || null;
+    } catch {
+      console.warn('⚠️ Invalid JSON in cache.');
+      return null;
+    }
   }
   return null;
 }
@@ -70,41 +75,34 @@ async function fetchAndPostNew() {
 
   hive.api.getDiscussionsByCreated({ tag: TAG_TO_TRACK, limit: POST_LIMIT }, async (err, result) => {
     if (err || !result || result.length === 0) {
-      console.error('❌ Hive API error or no result');
+      console.error('❌ Hive API error or no posts returned.');
       return;
     }
 
-    const newPosts = [];
-    for (const post of result) {
+    // Reverse result to go oldest to newest
+    const posts = result.slice().reverse();
+
+    let newLatestPermlink = null;
+
+    for (const post of posts) {
       if (post.permlink === lastPermlink) {
-        console.log(`⏭️ Skipping already posted: ${post.permlink}`);
+        console.log(`🛑 Reached last known post (${lastPermlink}), stopping.`);
         break;
       }
-      newPosts.push(post);
-    }
 
-    if (newPosts.length === 0) {
-      console.log('ℹ️ No new posts to send.');
-      return;
-    }
-
-    let newestPermlinkSent = null;
-
-    // Send from oldest to newest
-    for (let i = newPosts.length - 1; i >= 0; i--) {
-      const post = newPosts[i];
       try {
         await postToDiscord(post);
-        newestPermlinkSent = post.permlink;
+        newLatestPermlink = post.permlink;
         await sleep(DELAY_MS);
       } catch (e) {
         console.error(`❌ Failed to post: ${post.title}`, e.message);
       }
     }
 
-    // Only save if something was sent
-    if (newestPermlinkSent) {
-      saveLastPermlink(newestPermlinkSent);
+    if (newLatestPermlink) {
+      saveLastPermlink(newLatestPermlink);
+    } else {
+      console.log('ℹ️ No new posts sent.');
     }
   });
 }
