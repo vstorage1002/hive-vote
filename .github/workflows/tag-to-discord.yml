@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run tag-to-discord.js
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: node tag-to-discord.js
+      -  name: Run tag-to-discord.js
+  env:
+    DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_TAG_BOT }}
+  run: node script/tag-to-discord.js
