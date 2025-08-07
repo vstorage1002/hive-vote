@@ -7,6 +7,7 @@ const TAG_TO_TRACK = 'photography';
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 const CACHE_FILE = 'latest_post.json';
 const POST_LIMIT = 10;
+const DELAY_MS = 10000; // 10 seconds delay
 
 function loadLastPermlink() {
   if (fs.existsSync(CACHE_FILE)) {
@@ -27,6 +28,10 @@ function extractFirstImage(jsonMetadata) {
   } catch {
     return null;
   }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function postToDiscord(post) {
@@ -81,6 +86,7 @@ async function fetchAndPostNew() {
     for (let i = newPosts.length - 1; i >= 0; i--) {
       try {
         await postToDiscord(newPosts[i]);
+        await sleep(DELAY_MS); // ⏳ Wait 10 seconds
       } catch (e) {
         console.error(`❌ Failed to post: ${newPosts[i].title}`, e.message);
       }
