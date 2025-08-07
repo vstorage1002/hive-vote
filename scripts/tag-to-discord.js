@@ -7,7 +7,7 @@ const TAG_TO_TRACK = 'photography';
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 const CACHE_FILE = 'latest_post.json';
 const POST_LIMIT = 10;
-const DELAY_MS = 10000; // 10 seconds delay
+const DELAY_MS = 10000; // 10 seconds
 
 function loadLastPermlink() {
   if (fs.existsSync(CACHE_FILE)) {
@@ -19,6 +19,7 @@ function loadLastPermlink() {
 
 function saveLastPermlink(permlink) {
   fs.writeFileSync(CACHE_FILE, JSON.stringify({ permlink }, null, 2));
+  console.log(`💾 Saved last permlink: ${permlink}`);
 }
 
 function extractFirstImage(jsonMetadata) {
@@ -68,12 +69,17 @@ async function fetchAndPostNew() {
   const lastPermlink = loadLastPermlink();
 
   hive.api.getDiscussionsByCreated({ tag: TAG_TO_TRACK, limit: POST_LIMIT }, async (err, result) => {
-    if (err || !result || result.length === 0) return console.error('❌ Hive API error or no result');
+    if (err || !result || result.length === 0) {
+      console.error('❌ Hive API error or no result');
+      return;
+    }
 
     const newPosts = [];
-
     for (const post of result) {
-      if (post.permlink === lastPermlink) break;
+      if (post.permlink === lastPermlink) {
+        console.log(`⏭️ Skipping already posted: ${post.permlink}`);
+        break;
+      }
       newPosts.push(post);
     }
 
@@ -82,18 +88,24 @@ async function fetchAndPostNew() {
       return;
     }
 
+    let newestPermlinkSent = null;
+
     // Send from oldest to newest
     for (let i = newPosts.length - 1; i >= 0; i--) {
+      const post = newPosts[i];
       try {
-        await postToDiscord(newPosts[i]);
-        await sleep(DELAY_MS); // ⏳ Wait 10 seconds between posts
+        await postToDiscord(post);
+        newestPermlinkSent = post.permlink;
+        await sleep(DELAY_MS);
       } catch (e) {
-        console.error(`❌ Failed to post: ${newPosts[i].title}`, e.message);
+        console.error(`❌ Failed to post: ${post.title}`, e.message);
       }
     }
 
-    // ✅ Save newest posted permlink (top of newPosts list)
-    saveLastPermlink(newPosts[0].permlink);
+    // Only save if something was sent
+    if (newestPermlinkSent) {
+      saveLastPermlink(newestPermlinkSent);
+    }
   });
 }
 
