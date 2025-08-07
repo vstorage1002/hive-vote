@@ -5,9 +5,13 @@ on:
     - cron: '*/2 * * * *'  # every 2 minutes
   workflow_dispatch:
 
+permissions:
+  contents: write  # 👈 required for pushing commits
+
 jobs:
   notify:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -17,13 +21,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Download latest_post.json if it exists
-        uses: actions/download-artifact@v4
-        with:
-          name: latest-post-cache
-          path: scripts/
-        continue-on-error: true
-
       - name: Install dependencies
         run: npm install
 
@@ -32,9 +29,10 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_TAG_BOT }}
         run: node scripts/tag-to-discord.js
 
-      - name: Upload updated latest_post.json
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: latest-post-cache
-          path: scripts/latest_post.json
+      - name: Commit updated cache
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          git add scripts/latest_post.json
+          git diff --cached --quiet || git commit -m "Update latest_post.json cache"
+          git push
