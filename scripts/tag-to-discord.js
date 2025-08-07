@@ -6,14 +6,14 @@ require('dotenv').config();
 const TAG_TO_TRACK = 'photography';
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 const CACHE_FILE = 'latest_post.json';
-const POST_LIMIT = 10;
-const DELAY_MS = 10000;
+const POST_LIMIT = 20;
+const DELAY_MS = 10000; // 10 seconds
 
-function loadLastPermlink() {
+function loadLastPostId() {
   if (fs.existsSync(CACHE_FILE)) {
     try {
       const data = JSON.parse(fs.readFileSync(CACHE_FILE));
-      return data.permlink || null;
+      return data.post_id || null;
     } catch {
       console.warn('⚠️ Invalid cache JSON');
     }
@@ -21,9 +21,9 @@ function loadLastPermlink() {
   return null;
 }
 
-function saveLastPermlink(permlink) {
-  fs.writeFileSync(CACHE_FILE, JSON.stringify({ permlink }, null, 2));
-  console.log(`💾 Saved last permlink: ${permlink}`);
+function saveLastPostId(postId) {
+  fs.writeFileSync(CACHE_FILE, JSON.stringify({ post_id: postId }, null, 2));
+  console.log(`💾 Saved last post_id: ${postId}`);
 }
 
 function extractFirstImage(jsonMetadata) {
@@ -70,7 +70,7 @@ async function postToDiscord(post) {
 }
 
 async function fetchAndPostNew() {
-  const lastPermlink = loadLastPermlink();
+  const lastPostId = loadLastPostId(); // stored as "author/permlink"
 
   hive.api.getDiscussionsByCreated({ tag: TAG_TO_TRACK, limit: POST_LIMIT }, async (err, result) => {
     if (err || !result || result.length === 0) {
@@ -81,7 +81,8 @@ async function fetchAndPostNew() {
     const newPosts = [];
 
     for (const post of result) {
-      if (post.permlink === lastPermlink) break;
+      const currentId = `${post.author}/${post.permlink}`;
+      if (currentId === lastPostId) break; // stop when we reach previously posted
       newPosts.push(post);
     }
 
@@ -102,8 +103,9 @@ async function fetchAndPostNew() {
       }
     }
 
-    // ✅ Save the newest one we just posted
-    saveLastPermlink(newPosts[newPosts.length - 1].permlink);
+    // Save the newest post_id (latest post we just posted)
+    const newestPost = newPosts[newPosts.length - 1];
+    saveLastPostId(`${newestPost.author}/${newestPost.permlink}`);
   });
 }
 
