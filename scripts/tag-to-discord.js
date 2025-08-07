@@ -86,14 +86,14 @@ async function fetchAndPostNew() {
     for (let i = newPosts.length - 1; i >= 0; i--) {
       try {
         await postToDiscord(newPosts[i]);
-        await sleep(DELAY_MS); // ⏳ Wait 10 seconds
+        await sleep(DELAY_MS); // ⏳ Wait 10 seconds between posts
       } catch (e) {
         console.error(`❌ Failed to post: ${newPosts[i].title}`, e.message);
       }
     }
 
-    // Save latest permlink (first post in the fetched list)
-    saveLastPermlink(result[0].permlink);
+    // ✅ Save newest posted permlink (top of newPosts list)
+    saveLastPermlink(newPosts[0].permlink);
   });
 }
 
