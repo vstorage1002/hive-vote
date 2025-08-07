@@ -3,7 +3,7 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 require('dotenv').config();
 
-const TAG_TO_TRACK = 'travel'; // ← change to your target tag
+const TAG_TO_TRACK = 'photography'; // ← change to your target tag
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 const CACHE_FILE = 'latest_post.json';
 
