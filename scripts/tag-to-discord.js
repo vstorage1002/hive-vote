@@ -6,7 +6,7 @@ require('dotenv').config();
 const TAG_TO_TRACK = 'bayanihive';
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 const CACHE_FILE = 'scripts/latest_post.json';
-const POST_LIMIT = 20;
+const POST_LIMIT = 3;
 const DELAY_MS = 10000; // 10 seconds
 
 function loadLastPostId() {
