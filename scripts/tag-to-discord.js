@@ -7,7 +7,7 @@ const TAG_TO_TRACK = 'photography';
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 const CACHE_FILE = 'latest_post.json';
 const POST_LIMIT = 10;
-const DELAY_MS = 10000; // 10 seconds
+const DELAY_MS = 10000;
 
 function loadLastPermlink() {
   if (fs.existsSync(CACHE_FILE)) {
@@ -15,8 +15,7 @@ function loadLastPermlink() {
       const data = JSON.parse(fs.readFileSync(CACHE_FILE));
       return data.permlink || null;
     } catch {
-      console.warn('⚠️ Invalid JSON in cache.');
-      return null;
+      console.warn('⚠️ Invalid cache JSON');
     }
   }
   return null;
@@ -75,35 +74,36 @@ async function fetchAndPostNew() {
 
   hive.api.getDiscussionsByCreated({ tag: TAG_TO_TRACK, limit: POST_LIMIT }, async (err, result) => {
     if (err || !result || result.length === 0) {
-      console.error('❌ Hive API error or no posts returned.');
+      console.error('❌ Hive API error or empty result');
       return;
     }
 
-    // Reverse result to go oldest to newest
-    const posts = result.slice().reverse();
+    const newPosts = [];
 
-    let newLatestPermlink = null;
+    for (const post of result) {
+      if (post.permlink === lastPermlink) break;
+      newPosts.push(post);
+    }
 
-    for (const post of posts) {
-      if (post.permlink === lastPermlink) {
-        console.log(`🛑 Reached last known post (${lastPermlink}), stopping.`);
-        break;
-      }
+    if (newPosts.length === 0) {
+      console.log('ℹ️ No new posts to send.');
+      return;
+    }
 
+    // Reverse so we send from oldest to newest
+    newPosts.reverse();
+
+    for (const post of newPosts) {
       try {
         await postToDiscord(post);
-        newLatestPermlink = post.permlink;
         await sleep(DELAY_MS);
       } catch (e) {
         console.error(`❌ Failed to post: ${post.title}`, e.message);
       }
     }
 
-    if (newLatestPermlink) {
-      saveLastPermlink(newLatestPermlink);
-    } else {
-      console.log('ℹ️ No new posts sent.');
-    }
+    // ✅ Save the newest one we just posted
+    saveLastPermlink(newPosts[newPosts.length - 1].permlink);
   });
 }
 
