@@ -17,6 +17,13 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Download latest_post.json if it exists
+        uses: actions/download-artifact@v4
+        with:
+          name: latest-post-cache
+          path: scripts/
+        continue-on-error: true
+
       - name: Install dependencies
         run: npm install
 
@@ -24,3 +31,10 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_TAG_BOT }}
         run: node scripts/tag-to-discord.js
+
+      - name: Upload updated latest_post.json
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-post-cache
+          path: scripts/latest_post.json
