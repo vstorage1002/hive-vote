@@ -3,7 +3,7 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 require('dotenv').config();
 
-const TAG_TO_TRACK = 'photography';
+const TAG_TO_TRACK = 'bayanihive';
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK;
 const CACHE_FILE = 'scripts/latest_post.json';
 const POST_LIMIT = 20;
