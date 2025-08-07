@@ -10,11 +10,12 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@hiveio/hive-js": "^2.0.8",
-    "@types/node": "^22.13.11",
-    "body-parser": "^2.2.0",
-    "dotenv": "^17.2.0",
-    "express": "^5.1.0",
-    "sqlite3": "^5.1.7"
-  }
+  "@hiveio/hive-js": "^0.8.0",
+  "@types/node": "^22.13.11",
+  "body-parser": "^2.2.0",
+  "dotenv": "^17.2.0",
+  "express": "^5.1.0",
+  "node-fetch": "^2.6.9",
+  "sqlite3": "^5.1.7"
+}
 }
