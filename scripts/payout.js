@@ -13,7 +13,7 @@ const REWARD_CACHE_FILE = path.join(__dirname, '../ui/reward_cache.json');
 const PAYOUT_LOG_FILE = path.join(__dirname, '../ui/payout.log');
 const DELEGATION_HISTORY_FILE = path.join(__dirname, 'delegation_history.json');
 const MIN_PAYOUT = 0.001;
-const IS_DRY_RUN = true;
+const IS_DRY_RUN = false;
 
 const API_NODES = [
   'https://api.hive.blog',
