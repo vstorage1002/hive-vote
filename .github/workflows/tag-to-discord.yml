@@ -23,4 +23,4 @@ jobs:
       - name: Run tag-to-discord.js
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_TAG_BOT }}
-        run: node script/tag-to-discord.js
+        run: node scripts/tag-to-discord.js
