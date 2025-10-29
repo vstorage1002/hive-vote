@@ -1,3 +1,4 @@
+// distribute_rewards.js
 const hive = require('@hiveio/hive-js');
 const fs = require('fs');
 const https = require('https');
@@ -8,14 +9,17 @@ const HIVE_USER = process.env.HIVE_USER;
 const ACTIVE_KEY = process.env.ACTIVE_KEY;
 const DELEGATION_WEBHOOK_URL = process.env.DELEGATION_WEBHOOK_URL;
 
-
 const REWARD_CACHE_FILE = path.join(__dirname, '../ui/reward_cache.json');
 const PAYOUT_LOG_FILE = path.join(__dirname, '../ui/payout.log');
 const DELEGATION_HISTORY_FILE = path.join(__dirname, 'delegation_history.json');
 const FAILED_PAYOUTS_FILE = path.join(__dirname, '../ui/failed_payouts.json');
+
 const MIN_PAYOUT = 0.001;
-const IS_DRY_RUN = false;
-const MAX_RETRIES = 3;
+// Allow override from env; keep your default false if not set
+const IS_DRY_RUN = (typeof process.env.IS_DRY_RUN !== 'undefined') ? (process.env.IS_DRY_RUN === 'true') : false;
+
+let MAX_RETRIES = 3;
+if (process.env.MAX_RETRIES) MAX_RETRIES = parseInt(process.env.MAX_RETRIES, 10);
 const RETRY_DELAY_MS = 2000;
 const API_TIMEOUT_MS = 30000;
 
@@ -26,6 +30,8 @@ const API_NODES = [
   'https://rpc.ausbit.dev',
   'https://hived.privex.io',
 ];
+
+let CURRENT_NODE = null;
 
 function sendWebhookMessage(content, url) {
   if (!url) return;
@@ -57,62 +63,86 @@ async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Enhanced withRetry: retries on transient network errors and HTTP 5xx returned by node libraries.
+ * Considers messages containing '500', '502', '503', '504', 'Internal Server Error', ECONNRESET, ETIMEDOUT, timeout, ENOTFOUND as retriable.
+ */
 async function withRetry(fn, operation, maxRetries = MAX_RETRIES) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error) {
+      const msg = (error && error.message) ? error.message : String(error);
+
+      // Consider these retriable
+      const retriablePatterns = [
+        '504', '502', '503', '500',
+        'Internal Server Error',
+        'timeout', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND'
+      ];
+
+      const isRetriable = retriablePatterns.some(p => msg.includes(p));
+
       const isLastAttempt = attempt === maxRetries;
-      const isTimeoutError = error.message && (
-        error.message.includes('504') || 
-        error.message.includes('timeout') || 
-        error.message.includes('ECONNRESET') ||
-        error.message.includes('ETIMEDOUT')
-      );
-      
-      if (isLastAttempt || !isTimeoutError) {
+      if (isLastAttempt || !isRetriable) {
+        // Don't retry non-transient errors or if out of attempts
         throw error;
       }
-      
+
       const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
-      console.warn(`⚠️ ${operation} failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
+      console.warn(`⚠️ ${operation} failed (attempt ${attempt}/${maxRetries}): ${msg}`);
       console.log(`🔄 Retrying in ${delay}ms...`);
       await sleep(delay);
+
+      // rotate node on retriable errors to avoid a bad RPC node
+      rotateNode();
     }
   }
 }
 
+/** Set hive.api to the next node in API_NODES and record it */
+function setHiveNode(url) {
+  hive.api.setOptions({
+    url,
+    timeout: API_TIMEOUT_MS
+  });
+  CURRENT_NODE = url;
+  console.log(`🔁 Set Hive node to: ${url}`);
+}
+
+/** Rotate to the next node in list (used on retries) */
+function rotateNode() {
+  if (!CURRENT_NODE) {
+    setHiveNode(API_NODES[0]);
+    return;
+  }
+  const i = API_NODES.indexOf(CURRENT_NODE);
+  const next = API_NODES[(i + 1) % API_NODES.length];
+  setHiveNode(next);
+}
+
+/** Pick a working node by testing getDynamicGlobalProperties (doesn't require HIVE_USER) */
 async function pickWorkingNode() {
   for (const url of API_NODES) {
-    hive.api.setOptions({ 
-      url,
-      timeout: API_TIMEOUT_MS
-    });
-    console.log(`🌐 Trying Hive API node: ${url}`);
-    
     try {
-      const test = await withRetry(
-        () => new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('API timeout'));
-          }, API_TIMEOUT_MS);
-          
-          hive.api.getAccounts([HIVE_USER], (err, res) => {
-            clearTimeout(timeout);
-            if (err) reject(err);
-            else if (!res) reject(new Error('No response'));
-            else resolve(res);
-          });
-        }),
-        `Testing API node ${url}`
-      );
-      
-      if (test) {
-        console.log(`✅ Using Hive API: ${url}`);
-        return;
-      }
-    } catch (error) {
-      console.warn(`❌ API node ${url} failed: ${error.message}`);
+      setHiveNode(url);
+      console.log(`🌐 Testing Hive API node: ${url}`);
+
+      await withRetry(() => new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('API timeout')), API_TIMEOUT_MS);
+        hive.api.getDynamicGlobalProperties((err, res) => {
+          clearTimeout(timeout);
+          if (err) return reject(err);
+          if (!res) return reject(new Error('No response from node'));
+          resolve(res);
+        });
+      }), `Testing API node ${url}`, 2);
+
+      console.log(`✅ Using Hive API node: ${url}`);
+      return;
+    } catch (err) {
+      console.warn(`❌ Node ${url} failed health check: ${err.message}`);
+      // try next node
       continue;
     }
   }
@@ -131,87 +161,80 @@ async function getCurationRewards() {
   const phTz = 'Asia/Manila';
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
 
+  // curation window: 8:00 AM yesterday to 7:59:59.999 AM today
   const end = new Date(now);
   end.setHours(8, 0, 0, 0);
-
   const start = new Date(end);
   start.setDate(start.getDate() - 1);
 
   const fromTime = start.getTime();
   const toTime = end.getTime();
 
+  // Get latest index
   let latestIndex = await withRetry(
     () => new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('API timeout'));
-      }, API_TIMEOUT_MS);
-      
+      const timeout = setTimeout(() => reject(new Error('API timeout')), API_TIMEOUT_MS);
+      // request last operation
       hive.api.getAccountHistory(HIVE_USER, -1, 1, (err, res) => {
         clearTimeout(timeout);
-        if (err) reject(err);
-        else resolve(res[0][0]);
+        if (err) return reject(err);
+        if (!res || res.length === 0) return reject(new Error('Empty history response'));
+        // res[0] is [index, op]
+        resolve(res[0][0]);
       });
     }),
     'Getting latest account history index'
   );
 
   let totalVests = 0;
-  
-  // If account has fewer than 1000 operations, get them all at once
-  if (latestIndex < 999) {
+
+  // If latestIndex < 1000 we can fetch all at once; else paginate
+  if (latestIndex < 1000) {
     const history = await withRetry(
       () => new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('API timeout'));
-        }, API_TIMEOUT_MS);
-        
+        const timeout = setTimeout(() => reject(new Error('API timeout')), API_TIMEOUT_MS);
         hive.api.getAccountHistory(HIVE_USER, -1, latestIndex + 1, (err, res) => {
           clearTimeout(timeout);
-          if (err) reject(err);
-          else resolve(res);
+          if (err) return reject(err);
+          resolve(res || []);
         });
       }),
-      'Getting account history (small account)'
+      'Getting account history (small)'
     );
-    
-    if (history && history.length > 0) {
-      for (const [index, op] of history) {
-        const { timestamp, op: [type, data] } = op;
-        const opTime = new Date(timestamp + 'Z').getTime();
 
-        if (type === 'curation_reward' && opTime >= fromTime && opTime < toTime) {
-          totalVests += parseFloat(data.reward);
-        }
+    for (const [, op] of history) {
+      const { timestamp, op: [type, data] } = op;
+      const opTime = new Date(timestamp + 'Z').getTime();
+      if (type === 'curation_reward' && opTime >= fromTime && opTime < toTime) {
+        totalVests += parseFloat(data.reward);
       }
     }
   } else {
-    // Account has 1000+ operations, use pagination with proper start/limit validation
-    let limit = 1000;
+    // Pagination: iterate from latest backwards until older than start
     let startIndex = latestIndex;
+    const limit = 1000;
     let done = false;
 
-    while (!done) {
-      // Ensure startIndex >= limit-1 as required by Hive API
-      const adjustedStart = Math.max(startIndex, limit - 1);
-      
-      const history = await withRetry(
+    while (!done && startIndex >= 0) {
+      const fetchStart = Math.max(0, startIndex - (limit - 1));
+      const fetchLimit = startIndex - fetchStart + 1;
+
+      const historyBlock = await withRetry(
         () => new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('API timeout'));
-          }, API_TIMEOUT_MS);
-          
-          hive.api.getAccountHistory(HIVE_USER, adjustedStart, limit, (err, res) => {
+          const timeout = setTimeout(() => reject(new Error('API timeout')), API_TIMEOUT_MS);
+          hive.api.getAccountHistory(HIVE_USER, startIndex, fetchLimit, (err, res) => {
             clearTimeout(timeout);
-            if (err) reject(err);
-            else resolve(res);
+            if (err) return reject(err);
+            resolve(res || []);
           });
         }),
-        'Getting account history (pagination)'
+        `Getting account history batch starting ${startIndex}`
       );
 
-      if (!history || history.length === 0) break;
+      if (!historyBlock.length) break;
 
-      for (const [index, op] of history.reverse()) {
+      // process from newest to oldest
+      for (const [index, op] of historyBlock) {
         const { timestamp, op: [type, data] } = op;
         const opTime = new Date(timestamp + 'Z').getTime();
 
@@ -223,50 +246,10 @@ async function getCurationRewards() {
           done = true;
           break;
         }
-
-        const nextIndex = index - 1;
-        if (nextIndex < 0 || nextIndex < limit - 1) {
-          // If we can't maintain start >= limit-1, get remaining entries with smaller limit
-          if (nextIndex >= 0) {
-            const remainingLimit = nextIndex + 1;
-            const remainingHistory = await withRetry(
-              () => new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                  reject(new Error('API timeout'));
-                }, API_TIMEOUT_MS);
-                
-                hive.api.getAccountHistory(HIVE_USER, nextIndex, remainingLimit, (err, res) => {
-                  clearTimeout(timeout);
-                  if (err) reject(err);
-                  else resolve(res);
-                });
-              }),
-              'Getting remaining account history'
-            );
-            if (remainingHistory && remainingHistory.length > 0) {
-              for (const [rIndex, rOp] of remainingHistory.reverse()) {
-                const { timestamp: rTimestamp, op: [rType, rData] } = rOp;
-                const rOpTime = new Date(rTimestamp + 'Z').getTime();
-
-                if (rType === 'curation_reward' && rOpTime >= fromTime && rOpTime < toTime) {
-                  totalVests += parseFloat(rData.reward);
-                }
-
-                if (rOpTime < fromTime) {
-                  done = true;
-                  break;
-                }
-              }
-            }
-          }
-          done = true;
-          break;
-        }
-        
-        startIndex = nextIndex;
       }
 
-      if (history.length < limit) break;
+      startIndex = fetchStart - 1;
+      if (startIndex < 0) break;
     }
   }
 
@@ -276,14 +259,11 @@ async function getCurationRewards() {
 async function getDynamicProps() {
   return withRetry(
     () => new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('API timeout'));
-      }, API_TIMEOUT_MS);
-      
+      const timeout = setTimeout(() => reject(new Error('API timeout')), API_TIMEOUT_MS);
       hive.api.getDynamicGlobalProperties((err, res) => {
         clearTimeout(timeout);
-        if (err) reject(err);
-        else resolve(res);
+        if (err) return reject(err);
+        resolve(res);
       });
     }),
     'Getting dynamic global properties'
@@ -294,6 +274,10 @@ function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
   return (vests * totalVestingFundHive) / totalVestingShares;
 }
 
+/**
+ * sendPayout: wraps hive.broadcast.transfer with retry via withRetry.
+ * We consider transfer errors with 5xx / transient network errors retriable.
+ */
 async function sendPayout(to, amount) {
   const phDate = new Date().toLocaleDateString('en-US', {
     timeZone: 'Asia/Manila',
@@ -309,12 +293,11 @@ async function sendPayout(to, amount) {
     return Promise.resolve();
   }
 
+  // perform transfer with retry logic
   return withRetry(
     () => new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Transfer timeout'));
-      }, API_TIMEOUT_MS);
-      
+      const timeout = setTimeout(() => reject(new Error('Transfer timeout')), API_TIMEOUT_MS);
+
       hive.broadcast.transfer(
         ACTIVE_KEY,
         HIVE_USER,
@@ -324,15 +307,19 @@ async function sendPayout(to, amount) {
         (err, result) => {
           clearTimeout(timeout);
           if (err) {
-            reject(err);
-          } else {
-            console.log(`✅ Sent ${amount.toFixed(3)} HIVE to @${to}`);
-            resolve(result);
+            // normalize error message; include stack if available
+            const errMsg = (err && err.message) ? err.message : JSON.stringify(err);
+            // attach original err for debugging
+            const e = new Error(errMsg);
+            e.original = err;
+            return reject(e);
           }
+          resolve(result);
         }
       );
     }),
-    `Transfer to @${to}`
+    `Transfer to @${to}`,
+    5 // higher max retries for transfers
   );
 }
 
@@ -365,20 +352,21 @@ function saveFailedPayouts(failedPayouts) {
 function logFailedPayout(delegator, amount, error) {
   const failedPayouts = loadFailedPayouts();
   const timestamp = new Date().toISOString();
-  
+
   if (!failedPayouts[delegator]) {
     failedPayouts[delegator] = [];
   }
-  
+
   failedPayouts[delegator].push({
     timestamp,
     amount: parseFloat(amount.toFixed(10)),
-    error: error.message,
+    error: (error && error.message) ? error.message : String(error),
     retryCount: 0
   });
-  
+
   saveFailedPayouts(failedPayouts);
   console.log(`📝 Logged failed payout for @${delegator}: ${amount.toFixed(10)} HIVE`);
+  sendWebhookMessage(`❌ Failed payout logged for @${delegator}: ${amount.toFixed(10)} HIVE — ${error.message || error}`, DELEGATION_WEBHOOK_URL);
 }
 
 async function retryFailedPayouts() {
@@ -404,26 +392,24 @@ async function retryFailedPayouts() {
         await sendPayout(delegator, amount);
         totalSuccessful++;
         console.log(`✅ Successfully retried payout to @${delegator}: ${amount.toFixed(10)} HIVE`);
-        
-        // Log successful retry
+
         const logLine = `${new Date().toISOString()} - 🔄 Retry successful: ${amount.toFixed(10)} HIVE to @${delegator} (original failure: ${timestamp})\n`;
         fs.appendFileSync(PAYOUT_LOG_FILE, logLine);
+        sendWebhookMessage(`✅ Retry successful: ${amount.toFixed(10)} HIVE to @${delegator}`, DELEGATION_WEBHOOK_URL);
       } catch (error) {
         totalFailed++;
         console.error(`❌ Retry failed for @${delegator}: ${error.message}`);
-        
         if (retryCount < MAX_RETRIES) {
-          // Keep for next retry
           remainingFailures.push({
             ...failure,
             retryCount,
             lastRetry: new Date().toISOString()
           });
         } else {
-          // Max retries reached, give up
           console.log(`🚫 Max retries reached for @${delegator}, giving up`);
           const logLine = `${new Date().toISOString()} - 🚫 Max retries reached: ${amount.toFixed(10)} HIVE to @${delegator} (original failure: ${timestamp})\n`;
           fs.appendFileSync(PAYOUT_LOG_FILE, logLine);
+          sendWebhookMessage(`🚫 Max retries reached for @${delegator}: ${amount.toFixed(10)} HIVE — giving up`, DELEGATION_WEBHOOK_URL);
         }
       }
     }
@@ -453,42 +439,44 @@ async function retryFailedPayouts() {
   };
 }
 
-// CORRECTED FUNCTION: Calculate eligible delegation amounts properly
+/**
+ * calculateEligibleDelegation: same idea as your corrected function, ensures chronological processing.
+ * cutoffTime is in ms since epoch. events are expected to have .timestamp (ms) and .vests (change)
+ */
 function calculateEligibleDelegation(delegationHistory, cutoffTime, totalVestingFundHive, totalVestingShares) {
   const eligibleDelegators = {};
-  
+
   for (const [delegator, events] of Object.entries(delegationHistory)) {
-    // Sort events by timestamp to process them chronologically
     const sortedEvents = [...events].sort((a, b) => a.timestamp - b.timestamp);
-    
-    let eligibleVests = 0;
+
     let runningBalance = 0;
-    
+    let eligibleVests = 0;
+
     console.log(`\n🔍 Processing ${delegator}:`);
-    
-    // Process each delegation event chronologically
+
     for (const event of sortedEvents) {
-      const prevBalance = runningBalance;
-      runningBalance += event.vests; // event.vests is the change amount
-      
+      // event.vests is change (positive for delegation, negative for undelegation)
+      const eventTime = event.timestamp;
+      const beforeBalance = runningBalance;
+      runningBalance += event.vests;
+
+      const isEventEligible = eventTime <= cutoffTime;
+      const eventHp = vestsToHP(Math.abs(event.vests), totalVestingFundHive, totalVestingShares);
+
       const eventDate = new Date(event.timestamp).toISOString().split('T')[0];
-      const isEligible = event.timestamp <= cutoffTime;
-      const hp = vestsToHP(Math.abs(event.vests), totalVestingFundHive, totalVestingShares);
-      
-      console.log(`  📅 ${eventDate}: ${event.vests > 0 ? '+' : ''}${event.vests.toFixed(6)} VESTS (~${hp.toFixed(3)} HP) (Balance: ${runningBalance.toFixed(6)}) ${isEligible ? '✅ Eligible' : '❌ Too recent'}`);
-      
-      if (isEligible) {
-        // This delegation change is eligible (happened 6+ days ago)
-        // The eligible amount is the delegation balance after this operation
+      console.log(`  📅 ${eventDate}: ${event.vests > 0 ? '+' : ''}${event.vests.toFixed(6)} VESTS (~${eventHp.toFixed(3)} HP) (Balance after: ${runningBalance.toFixed(6)}) ${isEventEligible ? '✅' : '❌'}`);
+
+      // If this change occurred before cutoff, then the resulting balance after this change is eligible
+      if (isEventEligible) {
         eligibleVests = Math.max(0, runningBalance);
       }
-      // If not eligible, we don't update eligibleVests but continue tracking runningBalance
+      // If event is after cutoff, do not include its impact in eligibleVests, but keep runningBalance updated
     }
-    
-    // Ensure eligible amount doesn't exceed current delegation
+
+    // currentDelegation is runningBalance after all events
     const currentDelegation = Math.max(0, runningBalance);
     eligibleVests = Math.min(eligibleVests, currentDelegation);
-    
+
     if (eligibleVests > 0) {
       eligibleDelegators[delegator] = eligibleVests;
       const eligibleHP = vestsToHP(eligibleVests, totalVestingFundHive, totalVestingShares);
@@ -497,15 +485,17 @@ function calculateEligibleDelegation(delegationHistory, cutoffTime, totalVesting
       console.log(`  ❌ No eligible delegation (either too recent or fully withdrawn)`);
     }
   }
-  
+
   return eligibleDelegators;
 }
 
 async function distributeRewards() {
   console.log(`🚀 Calculating rewards for @${HIVE_USER}...`);
+
+  // Ensure we have a working node
   await pickWorkingNode();
 
-  // First, retry any failed payouts from previous runs
+  // Retry any failed payouts first
   await retryFailedPayouts();
 
   const [props, delegationHistory, totalVests] = await Promise.all([
@@ -535,24 +525,22 @@ async function distributeRewards() {
 
   const phTz = 'Asia/Manila';
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
-  now.setHours(0, 0, 0, 0);
-  const cutoff = now.getTime() - 6 * 24 * 60 * 60 * 1000;
+  now.setHours(0, 0, 0, 0); // midnight Manila
+  const cutoff = now.getTime() - 6 * 24 * 60 * 60 * 1000; // 6 days cutoff as per your logic
 
-  console.log(`⏰ Cutoff time: ${new Date(cutoff).toISOString()}`);
+  console.log(`⏰ Cutoff time (ms): ${cutoff} -> ${new Date(cutoff).toISOString()}`);
   console.log(`⏰ Current time: ${new Date().toISOString()}`);
 
-  // Use the corrected calculation function
   const eligibleDelegators = calculateEligibleDelegation(delegationHistory, cutoff, totalVestingFundHive, totalVestingShares);
 
-  let eligibleTotal = 0;
-  for (const vests of Object.values(eligibleDelegators)) {
-    eligibleTotal += vests;
-  }
+  let eligibleTotalVests = 0;
+  for (const v of Object.values(eligibleDelegators)) eligibleTotalVests += v;
 
-  console.log(`\n📈 Total eligible delegation: ${vestsToHP(eligibleTotal, totalVestingFundHive, totalVestingShares).toFixed(3)} HP`);
+  console.log(`\n📈 Total eligible delegation (VESTS): ${eligibleTotalVests.toFixed(6)}`);
+  console.log(`📈 Total eligible delegation (HP): ${vestsToHP(eligibleTotalVests, totalVestingFundHive, totalVestingShares).toFixed(3)} HP`);
 
-  if (eligibleTotal === 0) {
-    console.log('⚠️ No eligible delegations found (all delegations are less than 6 days old).');
+  if (eligibleTotalVests === 0) {
+    console.log('⚠️ No eligible delegations found (all delegations are too recent or zero).');
     return;
   }
 
@@ -560,25 +548,25 @@ async function distributeRewards() {
 
   console.log(`\n💰 Reward Distribution:`);
   for (const [delegator, eligibleVests] of Object.entries(eligibleDelegators)) {
-    const share = eligibleVests / eligibleTotal;
+    const share = eligibleVests / eligibleTotalVests;
     const todayReward = distributable * share;
 
     const previousUnpaid = rewardCache[delegator] || 0;
     const totalReward = parseFloat((previousUnpaid + todayReward).toFixed(10));
 
     if (totalReward >= MIN_PAYOUT) {
-      const amountToSend = Math.floor(totalReward * 1000) / 1000;
+      const amountToSend = Math.floor(totalReward * 1000) / 1000; // round down to 3 decimals
       const remainder = parseFloat((totalReward - amountToSend).toFixed(10));
 
       try {
         await sendPayout(delegator, amountToSend);
         rewardCache[delegator] = remainder;
         console.log(`📟 Sent ${amountToSend.toFixed(3)} HIVE to @${delegator}, remainder kept: ${remainder.toFixed(10)} HIVE`);
+        sendWebhookMessage(`✅ Sent ${amountToSend.toFixed(3)} HIVE to @${delegator}`, DELEGATION_WEBHOOK_URL);
       } catch (error) {
         console.error(`❌ Failed to send payout to @${delegator}: ${error.message}`);
-        // Log the failed payout for retry later
         logFailedPayout(delegator, amountToSend, error);
-        // Keep the reward in cache for next time
+        // keep whole totalReward in cache to avoid losing amounts
         rewardCache[delegator] = totalReward;
         console.log(`📦 Kept ${totalReward.toFixed(10)} HIVE in cache for @${delegator} due to failure`);
       }
@@ -588,6 +576,7 @@ async function distributeRewards() {
     }
   }
 
+  // Normalize cache values
   const roundedCache = {};
   for (const [k, v] of Object.entries(rewardCache)) {
     roundedCache[k] = parseFloat(v.toFixed(10));
@@ -598,4 +587,8 @@ async function distributeRewards() {
   console.log(`🌟 Done. 95% distributed, 5% retained (~${retained.toFixed(6)} HIVE).`);
 }
 
-distributeRewards().catch(console.error);
+distributeRewards().catch(err => {
+  console.error('Unhandled error in distribution:', err);
+  sendWebhookMessage(`🚨 Distribution script error: ${err.message || String(err)}`, DELEGATION_WEBHOOK_URL);
+  process.exit(1);
+});
