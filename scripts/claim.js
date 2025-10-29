@@ -6,15 +6,26 @@ const HIVE_USER = process.env.HIVE_USER;
 const ACTIVE_KEY = process.env.ACTIVE_KEY;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
-hive.api.setOptions({ url: 'https://api.hive.blog' });
+// Multiple fallback nodes
+const NODES = [
+  'https://api.hive.blog',
+  'https://anyx.io',
+  'https://api.openhive.network',
+  'https://rpc.ecency.com',
+];
+let currentNode = 0;
+
+function setNextNode() {
+  currentNode = (currentNode + 1) % NODES.length;
+  hive.api.setOptions({ url: NODES[currentNode] });
+  console.log(`🔁 Switched to backup node: ${NODES[currentNode]}`);
+}
+
+hive.api.setOptions({ url: NODES[currentNode] });
 
 function sendDiscordAlert(message) {
-  if (!DISCORD_WEBHOOK_URL) {
-    console.warn('⚠️ No DISCORD_WEBHOOK_URL provided.');
-    return;
-  }
-
-  const data = JSON.stringify({ content: String(message) }); // Ensure message is a string
+  if (!DISCORD_WEBHOOK_URL) return;
+  const data = JSON.stringify({ content: String(message) });
   const url = new URL(DISCORD_WEBHOOK_URL);
 
   const options = {
@@ -28,14 +39,11 @@ function sendDiscordAlert(message) {
   };
 
   const req = https.request(options, (res) => {
-    console.log(`📡 Discord webhook responded with status: ${res.statusCode}`);
-    res.on('data', (chunk) => {
-      console.log(`🔧 Response body: ${chunk.toString()}`);
-    });
+    console.log(`📡 Discord webhook responded: ${res.statusCode}`);
   });
 
   req.on('error', (error) => {
-    console.error('❌ Failed to send Discord alert:', error);
+    console.error('❌ Discord alert error:', error);
   });
 
   req.write(data);
@@ -45,18 +53,19 @@ function sendDiscordAlert(message) {
 async function claimRewards() {
   console.log(`🚀 Checking rewards for @${HIVE_USER}...`);
 
-  hive.api.getAccounts([HIVE_USER], (err, res) => {
+  hive.api.getAccounts([HIVE_USER], async (err, res) => {
     if (err || !res || res.length === 0) {
-      const failMsg = '❌ Failed to load account data.';
-      console.error(failMsg);
-      sendDiscordAlert(failMsg);
+      const msg = '❌ Failed to load account data.';
+      console.error(msg, err);
+      sendDiscordAlert(msg);
+      setNextNode();
       return;
     }
 
     const acct = res[0];
-    const hiveReward = acct.reward_hive_balance;
-    const hbdReward = acct.reward_hbd_balance;
-    const vestingReward = acct.reward_vesting_balance;
+    const hiveReward = acct.reward_hive_balance || '0.000 HIVE';
+    const hbdReward = acct.reward_hbd_balance || '0.000 HBD';
+    const vestingReward = acct.reward_vesting_balance || '0.000000 VESTS';
 
     const hasReward =
       hiveReward !== '0.000 HIVE' ||
@@ -64,12 +73,13 @@ async function claimRewards() {
       vestingReward !== '0.000000 VESTS';
 
     if (!hasReward) {
-      const msg = '📭 No rewards to claim at this time.';
+      const msg = '📭 No rewards to claim.';
       console.log(msg);
-      // Optional: send Discord alert even when no rewards
       sendDiscordAlert(msg);
       return;
     }
+
+    console.log(`💰 Attempting to claim: ${hiveReward}, ${hbdReward}, ${vestingReward}`);
 
     hive.broadcast.claimRewardBalance(
       ACTIVE_KEY,
@@ -79,20 +89,28 @@ async function claimRewards() {
       vestingReward,
       (err, result) => {
         if (err) {
-          const errorMsg = `❌ Failed to claim rewards: ${err.message}`;
-          console.error(errorMsg);
-          sendDiscordAlert(errorMsg);
+          const msg = `❌ Claim failed: ${err.message || err}`;
+          console.error(msg);
+          sendDiscordAlert(msg);
+
+          if (
+            err.message &&
+            (err.message.includes('Internal Server Error') ||
+              err.message.includes('500'))
+          ) {
+            // retry on another node
+            setNextNode();
+            console.log('🔁 Retrying claim on next node...');
+            setTimeout(claimRewards, 3000);
+          }
         } else {
-          const successMsg = `✅ @${HIVE_USER} claimed: ${hiveReward}, ${hbdReward}, ${vestingReward}`;
-          console.log(successMsg);
-          sendDiscordAlert(successMsg);
+          const msg = `✅ @${HIVE_USER} claimed: ${hiveReward}, ${hbdReward}, ${vestingReward}`;
+          console.log(msg);
+          sendDiscordAlert(msg);
         }
       }
     );
   });
 }
-
-// Optional: test webhook connectivity when script starts
-// sendDiscordAlert('🧪 Test webhook connection: Claim script started');
 
 claimRewards();
