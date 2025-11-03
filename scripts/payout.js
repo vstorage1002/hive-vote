@@ -233,8 +233,8 @@ async function getCurationRewards() {
 
       if (!historyBlock.length) break;
 
-      // process from newest to oldest
-      for (const [index, op] of historyBlock) {
+      // process from newest to oldest (reverse to iterate backwards)
+      for (const [index, op] of historyBlock.reverse()) {
         const { timestamp, op: [type, data] } = op;
         const opTime = new Date(timestamp + 'Z').getTime();
 
@@ -246,10 +246,47 @@ async function getCurationRewards() {
           done = true;
           break;
         }
+
+        const nextIndex = index - 1;
+        if (nextIndex < 0 || nextIndex < limit - 1) {
+          // If we can't maintain start >= limit-1, get remaining entries with smaller limit
+          if (nextIndex >= 0) {
+            const remainingLimit = nextIndex + 1;
+            const remainingHistory = await withRetry(
+              () => new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('API timeout')), API_TIMEOUT_MS);
+                hive.api.getAccountHistory(HIVE_USER, nextIndex, remainingLimit, (err, res) => {
+                  clearTimeout(timeout);
+                  if (err) return reject(err);
+                  resolve(res || []);
+                });
+              }),
+              'Getting remaining account history'
+            );
+            if (remainingHistory && remainingHistory.length > 0) {
+              for (const [rIndex, rOp] of remainingHistory.reverse()) {
+                const { timestamp: rTimestamp, op: [rType, rData] } = rOp;
+                const rOpTime = new Date(rTimestamp + 'Z').getTime();
+
+                if (rType === 'curation_reward' && rOpTime >= fromTime && rOpTime < toTime) {
+                  totalVests += parseFloat(rData.reward);
+                }
+
+                if (rOpTime < fromTime) {
+                  done = true;
+                  break;
+                }
+              }
+            }
+          }
+          done = true;
+          break;
+        }
+
+        startIndex = nextIndex;
       }
 
-      startIndex = fetchStart - 1;
-      if (startIndex < 0) break;
+      if (historyBlock.length < limit) break;
     }
   }
 
@@ -314,6 +351,7 @@ async function sendPayout(to, amount) {
             e.original = err;
             return reject(e);
           }
+          console.log(`✅ Sent ${amount.toFixed(3)} HIVE to @${to}`);
           resolve(result);
         }
       );
