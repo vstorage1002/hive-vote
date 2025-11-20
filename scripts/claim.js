@@ -3,7 +3,7 @@ const https = require('https');
 require('dotenv').config();
 
 const HIVE_USER = process.env.HIVE_USER;
-const ACTIVE_KEY = process.env.ACTIVE_KEY;
+const ACTIVE_KEY = process.env.ACTIVE_KEY; // must be the ACTIVE key
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
 // Multiple fallback nodes
@@ -81,6 +81,7 @@ async function claimRewards() {
 
     console.log(`💰 Attempting to claim: ${hiveReward}, ${hbdReward}, ${vestingReward}`);
 
+    // Claim rewards using ACTIVE_KEY (required)
     hive.broadcast.claimRewardBalance(
       ACTIVE_KEY,
       HIVE_USER,
@@ -93,12 +94,11 @@ async function claimRewards() {
           console.error(msg);
           sendDiscordAlert(msg);
 
+          // Retry if internal server error
           if (
             err.message &&
-            (err.message.includes('Internal Server Error') ||
-              err.message.includes('500'))
+            (err.message.includes('Internal Server Error') || err.message.includes('500'))
           ) {
-            // retry on another node
             setNextNode();
             console.log('🔁 Retrying claim on next node...');
             setTimeout(claimRewards, 3000);
