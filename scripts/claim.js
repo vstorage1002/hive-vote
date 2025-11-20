@@ -3,7 +3,7 @@ const https = require('https');
 require('dotenv').config();
 
 const HIVE_USER = process.env.HIVE_USER;
-const ACTIVE_KEY = process.env.ACTIVE_KEY;
+const ACTIVE_KEY = process.env.POSTINGKEY;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
 // Multiple fallback nodes
