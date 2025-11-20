@@ -2,13 +2,13 @@ name: Auto Claim Hive Rewards
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # Every 15 minutes
-  workflow_dispatch:       # Allows manual run from GitHub UI
+    - cron: '*/15 * * * *'  # every 15 minutes
+  workflow_dispatch:
 
 jobs:
   claim:
-    runs-on: ubuntu-22.04   # Use a specific Ubuntu version for consistency
-    timeout-minutes: 10     # Optional: prevent job from hanging forever
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -25,9 +25,6 @@ jobs:
       - name: Run claim script
         env:
           HIVE_USER: ${{ secrets.HIVE_USER }}
-          ACTIVE_KEY: ${{ secrets.ACTIVE_KEY }}  # must contain the ACTIVE key
+          ACTIVE_KEY: ${{ secrets.ACTIVE_KEY }}      # must be ACTIVE key
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: node scripts/claim.js
-
-
-         # Start for running the code
