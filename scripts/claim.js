@@ -2,8 +2,9 @@ const hive = require('@hiveio/hive-js');
 const https = require('https');
 require('dotenv').config();
 
+// Use clear variable names
 const HIVE_USER = process.env.HIVE_USER;
-const ACTIVE_KEY = process.env.POSTING_KEY; // must be the ACTIVE key
+const POSTING_KEY = process.env.POSTING_KEY; // Posting key for claiming VESTS
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
 // Multiple fallback nodes
@@ -15,16 +16,20 @@ const NODES = [
 ];
 let currentNode = 0;
 
+// Switch to next node on error
 function setNextNode() {
   currentNode = (currentNode + 1) % NODES.length;
   hive.api.setOptions({ url: NODES[currentNode] });
   console.log(`🔁 Switched to backup node: ${NODES[currentNode]}`);
 }
 
+// Initialize first node
 hive.api.setOptions({ url: NODES[currentNode] });
 
+// Send Discord alert
 function sendDiscordAlert(message) {
   if (!DISCORD_WEBHOOK_URL) return;
+
   const data = JSON.stringify({ content: String(message) });
   const url = new URL(DISCORD_WEBHOOK_URL);
 
@@ -50,6 +55,7 @@ function sendDiscordAlert(message) {
   req.end();
 }
 
+// Main claim function
 async function claimRewards() {
   console.log(`🚀 Checking rewards for @${HIVE_USER}...`);
 
@@ -81,7 +87,7 @@ async function claimRewards() {
 
     console.log(`💰 Attempting to claim: ${hiveReward}, ${hbdReward}, ${vestingReward}`);
 
-    // Claim rewards using ACTIVE_KEY (required)
+    // Claim using posting key for VESTS
     hive.broadcast.claimRewardBalance(
       POSTING_KEY,
       HIVE_USER,
@@ -94,7 +100,7 @@ async function claimRewards() {
           console.error(msg);
           sendDiscordAlert(msg);
 
-          // Retry if internal server error
+          // Retry on node error
           if (
             err.message &&
             (err.message.includes('Internal Server Error') || err.message.includes('500'))
@@ -113,4 +119,5 @@ async function claimRewards() {
   });
 }
 
+// Start the process
 claimRewards();
