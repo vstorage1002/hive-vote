@@ -6,24 +6,27 @@ const HIVE_USER = process.env.HIVE_USER;
 const POSTING_KEY = process.env.POSTING_KEY;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
-// Multiple fallback nodes (ordered by reliability)
+// Multiple fallback nodes (all available nodes)
 const NODES = [
-  'https://api.hive.blog',
+  'https://api.deathwing.me',
   'https://api.openhive.network',
-  'https://herpc.dtools.dev',
+  'https://api.hive.blog',
   'https://anyx.io',
+  'https://hive.roelandp.nl',
   'https://rpc.ausbit.dev',
-  'https://hived.privex.io',
+  'https://hived.emre.sh',
+  'https://hive-api.arcange.eu',
+  'https://api.c0ff33a.uk',
   'https://rpc.ecency.com',
+  'https://techcoderx.com',
+  'https://api.hive.blue',
+  'https://herpc.dtools.dev',
+  'https://rpc.mahdiyari.info',
 ];
 
 let currentNodeIndex = 0;
-let nodeHealthStatus = {}; // Track which nodes are working
-
-// Initialize health status
-NODES.forEach(node => {
-  nodeHealthStatus[node] = true;
-});
+let retryCount = 0;
+const MAX_RETRIES = 13; // Try all 13 nodes before giving up
 
 function setNode(index) {
   currentNodeIndex = index % NODES.length;
@@ -36,25 +39,10 @@ function setNode(index) {
 
 // Find a healthy node
 function findHealthyNode() {
-  for (let i = 0; i < NODES.length; i++) {
-    const node = NODES[i];
-    if (nodeHealthStatus[node]) {
-      setNode(NODES.indexOf(node));
-      return true;
-    }
-  }
-  // If no healthy nodes, reset and try all again
-  console.log('⚠️ No healthy nodes found, resetting health status...');
-  NODES.forEach(node => {
-    nodeHealthStatus[node] = true;
-  });
-  setNode(0);
+  retryCount++;
+  currentNodeIndex = (currentNodeIndex + 1) % NODES.length;
+  setNode(currentNodeIndex);
   return true;
-}
-
-function markNodeUnhealthy(node) {
-  nodeHealthStatus[node] = false;
-  console.log(`❌ Marked node as unhealthy: ${node}`);
 }
 
 function sendDiscordAlert(message) {
@@ -111,9 +99,9 @@ function claimRewardBalance(key, user, hive_payout, hbd_payout, vests_payout) {
   });
 }
 
-async function attemptClaim(attemptNum) {
+async function attemptClaim() {
   try {
-    console.log(`\n� Claim Attempt ${attemptNum}/3 - Using: ${NODES[currentNodeIndex]}`);
+    console.log(`\n🚀 Claim Attempt ${retryCount + 1}/${MAX_RETRIES} - Using: ${NODES[currentNodeIndex]}`);
     
     // Get account data
     const accounts = await getAccounts(HIVE_USER);
@@ -159,7 +147,7 @@ async function attemptClaim(attemptNum) {
     const currentNode = NODES[currentNodeIndex];
     const errorMsg = err.message || String(err);
     
-    console.error(`❌ Attempt ${attemptNum} failed: ${errorMsg}`);
+    console.error(`❌ Attempt ${retryCount + 1} failed: ${errorMsg}`);
 
     // Classify error
     const isTemporaryError = 
@@ -175,28 +163,18 @@ async function attemptClaim(attemptNum) {
       errorMsg.includes('RPCError') ||
       errorMsg.includes('Account not found');
 
-    if (isTemporaryError) {
-      markNodeUnhealthy(currentNode);
-      console.log('� Temporary error - trying next node...');
+    if (retryCount < MAX_RETRIES - 1) {
+      console.log(`🔄 Trying next node (${retryCount + 1}/${MAX_RETRIES})...`);
+      findHealthyNode();
       
-      if (attemptNum < 3) {
-        findHealthyNode();
-        await new Promise(resolve => setTimeout(resolve, 5000 + attemptNum * 2000)); // Exponential backoff
-        return attemptClaim(attemptNum + 1);
-      }
-    } else if (isPermanentError) {
-      console.log('⚠️ Permanent error - node may be misconfigured');
-      markNodeUnhealthy(currentNode);
-      
-      if (attemptNum < 3) {
-        findHealthyNode();
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        return attemptClaim(attemptNum + 1);
-      }
+      // Exponential backoff
+      const waitTime = 3000 + retryCount * 2000;
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return attemptClaim();
     }
 
     // All attempts failed
-    const finalMsg = `❌ FAILED after 3 attempts. Last error: ${errorMsg}`;
+    const finalMsg = `❌ FAILED after ${MAX_RETRIES} attempts. Last error: ${errorMsg}`;
     console.error(finalMsg);
     sendDiscordAlert(finalMsg);
     process.exit(1);
@@ -205,4 +183,4 @@ async function attemptClaim(attemptNum) {
 
 // Start claiming
 setNode(0);
-attemptClaim(1);
+attemptClaim();
