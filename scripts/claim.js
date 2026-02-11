@@ -7,11 +7,14 @@ const HIVE_USER = process.env.HIVE_USER;
 const POSTING_KEY = process.env.POSTING_KEY; // Posting key for claiming VESTS
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
-// Multiple fallback nodes
+// Multiple fallback nodes (ordered by reliability)
 const NODES = [
   'https://api.hive.blog',
-  'https://anyx.io',
   'https://api.openhive.network',
+  'https://herpc.dtools.dev',
+  'https://anyx.io',
+  'https://rpc.ausbit.dev',
+  'https://hived.privex.io',
   'https://rpc.ecency.com',
 ];
 let currentNode = 0;
@@ -19,12 +22,18 @@ let currentNode = 0;
 // Switch to next node on error
 function setNextNode() {
   currentNode = (currentNode + 1) % NODES.length;
-  hive.api.setOptions({ url: NODES[currentNode] });
+  hive.api.setOptions({ 
+    url: NODES[currentNode],
+    timeout: 30000 // 30 second timeout
+  });
   console.log(`🔁 Switched to backup node: ${NODES[currentNode]}`);
 }
 
-// Initialize first node
-hive.api.setOptions({ url: NODES[currentNode] });
+// Initialize first node with timeout
+hive.api.setOptions({ 
+  url: NODES[currentNode],
+  timeout: 30000 // 30 second timeout
+});
 
 // Send Discord alert
 function sendDiscordAlert(message) {
@@ -100,10 +109,14 @@ async function claimRewards() {
           console.error(msg);
           sendDiscordAlert(msg);
 
-          // Retry on node error
+          // Retry on node error or timeout
           if (
             err.message &&
-            (err.message.includes('Internal Server Error') || err.message.includes('500'))
+            (err.message.includes('Internal Server Error') || 
+             err.message.includes('500') ||
+             err.message.includes('504') ||
+             err.message.includes('Gateway Time-out') ||
+             err.message.includes('timeout'))
           ) {
             setNextNode();
             console.log('🔁 Retrying claim on next node...');

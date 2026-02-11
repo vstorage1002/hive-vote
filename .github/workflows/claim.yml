@@ -22,9 +22,20 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run claim script
+      - name: Run claim script with retry
         env:
           HIVE_USER: ${{ secrets.HIVE_USER }}
           POSTING_KEY: ${{ secrets.POSTING_KEY }}      # must be ACTIVE key
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: node scripts/claim.js
+        run: |
+          for i in {1..3}; do
+            echo "Attempt $i of 3..."
+            node scripts/claim.js
+            if [ $? -eq 0 ]; then
+              echo "✅ Claim successful!"
+              exit 0
+            fi
+            echo "❌ Attempt $i failed, waiting 30 seconds..."
+            sleep 30
+          done
+          echo "❌ All attempts failed"
