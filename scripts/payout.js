@@ -18,17 +18,26 @@ const MIN_PAYOUT = 0.001;
 // Allow override from env; keep your default false if not set
 const IS_DRY_RUN = (typeof process.env.IS_DRY_RUN !== 'undefined') ? (process.env.IS_DRY_RUN === 'true') : false;
 
-let MAX_RETRIES = 3;
+let MAX_RETRIES = 5;
 if (process.env.MAX_RETRIES) MAX_RETRIES = parseInt(process.env.MAX_RETRIES, 10);
 const RETRY_DELAY_MS = 2000;
-const API_TIMEOUT_MS = 30000;
+const API_TIMEOUT_MS = 45000;
 
 const API_NODES = [
-  'https://api.hive.blog',
+  'https://api.deathwing.me',
   'https://api.openhive.network',
+  'https://api.hive.blog',
   'https://anyx.io',
+  'https://hive.roelandp.nl',
   'https://rpc.ausbit.dev',
-  'https://hived.privex.io',
+  'https://hived.emre.sh',
+  'https://hive-api.arcange.eu',
+  'https://api.c0ff33a.uk',
+  'https://rpc.ecency.com',
+  'https://techcoderx.com',
+  'https://api.hive.blue',
+  'https://rpc.mahdiyari.info',
+  'https://herpc.dtools.dev',
 ];
 
 let CURRENT_NODE = null;
