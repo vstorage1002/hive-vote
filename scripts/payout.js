@@ -5,9 +5,22 @@ const https = require('https');
 const path = require('path');
 require('dotenv').config();
 
-const HIVE_USER = process.env.HIVE_USER;
-const ACTIVE_KEY = process.env.ACTIVE_KEY;
+const HIVE_USER = (process.env.HIVE_USER || '').trim();
+const ACTIVE_KEY = (process.env.ACTIVE_KEY || '').trim();
 const DELEGATION_WEBHOOK_URL = process.env.DELEGATION_WEBHOOK_URL;
+
+if (!HIVE_USER) {
+  console.error('❌ HIVE_USER env var is missing or empty.');
+  process.exit(1);
+}
+if (!ACTIVE_KEY) {
+  console.error('❌ ACTIVE_KEY env var is missing or empty.');
+  process.exit(1);
+}
+if (!/^5[HJK][1-9A-HJ-NP-Za-km-z]{49}$/.test(ACTIVE_KEY)) {
+  console.error('❌ ACTIVE_KEY does not look like a valid Hive WIF private key (should start with 5 and be 51 chars). Check your GitHub secret for extra spaces, quotes, or newlines.');
+  process.exit(1);
+}
 
 const REWARD_CACHE_FILE = path.join(__dirname, '../ui/reward_cache.json');
 const PAYOUT_LOG_FILE = path.join(__dirname, '../ui/payout.log');
