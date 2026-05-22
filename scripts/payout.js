@@ -26,6 +26,7 @@ const REWARD_CACHE_FILE = path.join(__dirname, '../ui/reward_cache.json');
 const PAYOUT_LOG_FILE = path.join(__dirname, '../ui/payout.log');
 const DELEGATION_HISTORY_FILE = path.join(__dirname, 'delegation_history.json');
 const FAILED_PAYOUTS_FILE = path.join(__dirname, '../ui/failed_payouts.json');
+const PAYOUT_LEDGER_FILE = path.join(__dirname, '../ui/payout_ledger.json');
 
 const MIN_PAYOUT = 0.001;
 // Allow override from env; keep your default false if not set
@@ -472,6 +473,52 @@ function logFailedPayout(delegator, amount, error) {
   sendWebhookMessage(`Failed payout logged for @${delegator}: ${amount.toFixed(10)} HIVE - ${error.message || error}`, DELEGATION_WEBHOOK_URL);
 }
 
+function loadPayoutLedger() {
+  if (!fs.existsSync(PAYOUT_LEDGER_FILE)) {
+    return { payouts: [], metadata: { version: '1.0', createdAt: new Date().toISOString() } };
+  }
+  try {
+    return JSON.parse(fs.readFileSync(PAYOUT_LEDGER_FILE));
+  } catch (error) {
+    console.warn('⚠️ Could not parse payout ledger, starting fresh:', error.message);
+    return { payouts: [], metadata: { version: '1.0', createdAt: new Date().toISOString() } };
+  }
+}
+
+function savePayoutLedger(ledger) {
+  // Atomic write: write to temp file then rename
+  const tempFile = PAYOUT_LEDGER_FILE + '.tmp';
+  fs.writeFileSync(tempFile, JSON.stringify(ledger, null, 2));
+  fs.renameSync(tempFile, PAYOUT_LEDGER_FILE);
+}
+
+function createPayoutLedgerEntry(delegator, amount, memo) {
+  return {
+    id: `${delegator}-${Date.now()}`,
+    delegator,
+    amount: parseFloat(amount.toFixed(10)),
+    memo,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+    attempts: 0,
+    lastAttempt: null,
+    error: null,
+    txId: null
+  };
+}
+
+function updatePayoutLedgerStatus(ledger, entryId, status, txId = null, error = null) {
+  const entry = ledger.payouts.find(p => p.id === entryId);
+  if (entry) {
+    entry.status = status;
+    entry.lastAttempt = new Date().toISOString();
+    entry.attempts += 1;
+    if (txId) entry.txId = txId;
+    if (error) entry.error = error;
+  }
+  return entry;
+}
+
 async function retryFailedPayouts() {
   const failedPayouts = loadFailedPayouts();
   const updatedFailedPayouts = {};
@@ -603,6 +650,35 @@ function calculateEligibleDelegation(delegationHistory, cutoffTime, totalVesting
   return eligibleDelegators;
 }
 
+async function recoverPendingPayouts() {
+  const ledger = loadPayoutLedger();
+  const pendingPayouts = ledger.payouts.filter(p => p.status === 'pending');
+  
+  if (pendingPayouts.length === 0) {
+    return;
+  }
+  
+  console.log(`\n🔍 Found ${pendingPayouts.length} pending payouts from previous run. Recovering...`);
+  
+  for (const entry of pendingPayouts) {
+    console.log(`📋 Recovering: ${entry.amount.toFixed(3)} HIVE to @${entry.delegator} (created: ${entry.createdAt})`);
+    
+    try {
+      await sendPayout(entry.delegator, entry.amount);
+      updatePayoutLedgerStatus(ledger, entry.id, 'sent', null, null);
+      console.log(`✅ Recovered payout to @${entry.delegator}: ${entry.amount.toFixed(3)} HIVE`);
+      sendWebhookMessage(`✅ Recovered payout: ${entry.amount.toFixed(3)} HIVE to @${entry.delegator}`, DELEGATION_WEBHOOK_URL);
+    } catch (error) {
+      console.error(`❌ Failed to recover payout to @${entry.delegator}: ${error.message}`);
+      logFailedPayout(entry.delegator, entry.amount, error);
+      updatePayoutLedgerStatus(ledger, entry.id, 'failed', null, error.message);
+    }
+  }
+  
+  savePayoutLedger(ledger);
+  console.log(`📊 Recovery complete. Updated ledger with results.`);
+}
+
 async function distributeRewards() {
   console.log(`🚀 Calculating rewards for @${HIVE_USER}...`);
 
@@ -610,7 +686,10 @@ async function distributeRewards() {
   await pickWorkingNode();
   await validateActiveKeyMatchesAccount();
 
-  // Retry any failed payouts first
+  // First, recover any pending payouts from previous run
+  await recoverPendingPayouts();
+  
+  // Then retry any failed payouts
   await retryFailedPayouts();
 
   const [props, delegationHistory, totalVests] = await Promise.all([
@@ -660,8 +739,11 @@ async function distributeRewards() {
   }
 
   const rewardCache = loadRewardCache();
-
-  console.log(`\n💰 Reward Distribution:`);
+  const ledger = loadPayoutLedger();
+  const pendingPayouts = [];
+  
+  // First, calculate all payouts and save to ledger
+  console.log(`\n💰 Calculating Rewards and Creating Ledger:`);
   for (const [delegator, eligibleVests] of Object.entries(eligibleDelegators)) {
     const share = eligibleVests / eligibleTotalVests;
     const todayReward = distributable * share;
@@ -672,23 +754,49 @@ async function distributeRewards() {
     if (totalReward >= MIN_PAYOUT) {
       const amountToSend = Math.floor(totalReward * 1000) / 1000; // round down to 3 decimals
       const remainder = parseFloat((totalReward - amountToSend).toFixed(10));
-
-      try {
-        await sendPayout(delegator, amountToSend);
-        rewardCache[delegator] = remainder;
-        console.log(`📟 Sent ${amountToSend.toFixed(3)} HIVE to @${delegator}, remainder kept: ${remainder.toFixed(10)} HIVE`);
-        sendWebhookMessage(`✅ Sent ${amountToSend.toFixed(3)} HIVE to @${delegator}`, DELEGATION_WEBHOOK_URL);
-      } catch (error) {
-        console.error(`❌ Failed to send payout to @${delegator}: ${error.message}`);
-        logFailedPayout(delegator, amountToSend, error);
-        // keep whole totalReward in cache to avoid losing amounts
-        rewardCache[delegator] = totalReward;
-        console.log(`📦 Kept ${totalReward.toFixed(10)} HIVE in cache for @${delegator} due to failure`);
-      }
+      
+      const memo = `Curation rewards for @${delegator} - ${new Date().toLocaleDateString('en-US', { timeZone: phTz })}`;
+      const entry = createPayoutLedgerEntry(delegator, amountToSend, memo);
+      pendingPayouts.push({ entry, remainder, totalReward });
+      
+      console.log(`📝 Ledger entry for @${delegator}: ${amountToSend.toFixed(3)} HIVE (remainder: ${remainder.toFixed(10)})`);
     } else {
       rewardCache[delegator] = totalReward;
       console.log(`📦 Stored for @${delegator}: ${totalReward.toFixed(10)} HIVE`);
     }
+  }
+  
+  // Save ledger with all pending payouts BEFORE attempting any transfers
+  if (pendingPayouts.length > 0) {
+    ledger.payouts.push(...pendingPayouts.map(p => p.entry));
+    ledger.metadata.lastCalculatedAt = new Date().toISOString();
+    savePayoutLedger(ledger);
+    console.log(`\n� Saved ${pendingPayouts.length} payout entries to ledger`);
+  }
+  
+  // Now attempt to send all payouts
+  console.log(`\n💰 Executing Payouts:`);
+  for (const { entry, remainder, totalReward } of pendingPayouts) {
+    try {
+      await sendPayout(entry.delegator, entry.amount);
+      rewardCache[entry.delegator] = remainder;
+      updatePayoutLedgerStatus(ledger, entry.id, 'sent', null, null);
+      console.log(`📟 Sent ${entry.amount.toFixed(3)} HIVE to @${entry.delegator}, remainder kept: ${remainder.toFixed(10)} HIVE`);
+      sendWebhookMessage(`✅ Sent ${entry.amount.toFixed(3)} HIVE to @${entry.delegator}`, DELEGATION_WEBHOOK_URL);
+    } catch (error) {
+      console.error(`❌ Failed to send payout to @${entry.delegator}: ${error.message}`);
+      logFailedPayout(entry.delegator, entry.amount, error);
+      updatePayoutLedgerStatus(ledger, entry.id, 'failed', null, error.message);
+      // keep whole totalReward in cache to avoid losing amounts
+      rewardCache[entry.delegator] = totalReward;
+      console.log(`📦 Kept ${totalReward.toFixed(10)} HIVE in cache for @${entry.delegator} due to failure`);
+    }
+  }
+  
+  // Save final ledger state
+  if (pendingPayouts.length > 0) {
+    savePayoutLedger(ledger);
+    console.log(`\n� Updated ledger with payout results`);
   }
 
   // Normalize cache values
