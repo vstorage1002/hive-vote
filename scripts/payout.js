@@ -179,6 +179,12 @@ async function getCurationRewards() {
   const fromTime = start.getTime();
   const toTime = end.getTime();
 
+  // Log the 24-hour window details
+  console.log(`\n📅 24-Hour Curation Window (Asia/Manila timezone):`);
+  console.log(`   Start: ${start.toLocaleString('en-US', { timeZone: phTz })} (${fromTime})`);
+  console.log(`   End:   ${end.toLocaleString('en-US', { timeZone: phTz })} (${toTime})`);
+  console.log(`   UTC:   ${start.toISOString()} to ${end.toISOString()}`);
+
   // Get latest index
   let latestIndex = await withRetry(
     () => new Promise((resolve, reject) => {
@@ -196,6 +202,7 @@ async function getCurationRewards() {
   );
 
   let totalVests = 0;
+  let curationCount = 0;
 
   // If latestIndex < 1000 we can fetch all at once; else paginate
   if (latestIndex < 1000) {
@@ -216,6 +223,7 @@ async function getCurationRewards() {
       const opTime = new Date(timestamp + 'Z').getTime();
       if (type === 'curation_reward' && opTime >= fromTime && opTime < toTime) {
         totalVests += parseFloat(data.reward);
+        curationCount++;
       }
     }
   } else {
@@ -223,6 +231,10 @@ async function getCurationRewards() {
     let startIndex = latestIndex;
     const limit = 1000;
     let done = false;
+    let batchesFetched = 0;
+    let operationsChecked = 0;
+
+    console.log(`📚 Fetching account history: ${latestIndex + 1} total operations, paginating by ${limit}...`);
 
     while (!done && startIndex >= 0) {
       const fetchStart = Math.max(0, startIndex - (limit - 1));
@@ -243,61 +255,51 @@ async function getCurationRewards() {
       if (!historyBlock.length) break;
 
       // process from newest to oldest (reverse to iterate backwards)
+      batchesFetched++;
       for (const [index, op] of historyBlock.reverse()) {
+        operationsChecked++;
         const { timestamp, op: [type, data] } = op;
         const opTime = new Date(timestamp + 'Z').getTime();
 
         if (type === 'curation_reward' && opTime >= fromTime && opTime < toTime) {
-          totalVests += parseFloat(data.reward);
+          const rewardVests = parseFloat(data.reward);
+          totalVests += rewardVests;
+
+          // Log individual curation reward
+          curationCount++;
+          const rewardTime = new Date(opTime);
+          const timeStr = rewardTime.toLocaleString('en-US', { timeZone: phTz });
+          console.log(`   ⭐ [${curationCount}] Curation reward @ ${timeStr}: +${rewardVests.toFixed(6)} VESTS (from @${data.author})`);
         }
 
         if (opTime < fromTime) {
           done = true;
           break;
         }
+      }
 
-        const nextIndex = index - 1;
-        if (nextIndex < 0 || nextIndex < limit - 1) {
-          // If we can't maintain start >= limit-1, get remaining entries with smaller limit
-          if (nextIndex >= 0) {
-            const remainingLimit = nextIndex + 1;
-            const remainingHistory = await withRetry(
-              () => new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => reject(new Error('API timeout')), API_TIMEOUT_MS);
-                hive.api.getAccountHistory(HIVE_USER, nextIndex, remainingLimit, (err, res) => {
-                  clearTimeout(timeout);
-                  if (err) return reject(err);
-                  resolve(res || []);
-                });
-              }),
-              'Getting remaining account history'
-            );
-            if (remainingHistory && remainingHistory.length > 0) {
-              for (const [rIndex, rOp] of remainingHistory.reverse()) {
-                const { timestamp: rTimestamp, op: [rType, rData] } = rOp;
-                const rOpTime = new Date(rTimestamp + 'Z').getTime();
+      // Progress logging every 10 batches
+      if (batchesFetched % 10 === 0) {
+        console.log(`  📖 Processed ${batchesFetched} batches (${operationsChecked} operations), current total: ${totalVests.toFixed(6)} VESTS`);
+      }
 
-                if (rType === 'curation_reward' && rOpTime >= fromTime && rOpTime < toTime) {
-                  totalVests += parseFloat(rData.reward);
-                }
-
-                if (rOpTime < fromTime) {
-                  done = true;
-                  break;
-                }
-              }
-            }
-          }
-          done = true;
-          break;
-        }
-
-        startIndex = nextIndex;
+      // Calculate next startIndex for pagination
+      // fetchStart is the lowest index we just processed (already declared above)
+      if (fetchStart === 0) {
+        done = true; // Reached the beginning of history
+      } else {
+        startIndex = fetchStart - 1; // Next batch starts just before this one
       }
 
       if (historyBlock.length < limit) break;
     }
+
+    console.log(`  ✅ History fetch complete: ${batchesFetched} batches, ${operationsChecked} operations checked`);
   }
+
+  console.log(`\n💰 Curation Rewards Summary (24h window):`);
+  console.log(`   Individual curation rewards found: ${curationCount}`);
+  console.log(`   Total VESTS found: ${totalVests.toFixed(6)} VESTS`);
 
   return totalVests;
 }
@@ -572,7 +574,7 @@ async function distributeRewards() {
 
   const phTz = 'Asia/Manila';
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
-  now.setHours(0, 0, 0, 0); // midnight Manila
+  now.setHours(8, 0, 0, 0); // 8 AM Manila — matches getCurationRewards window boundary
   const cutoff = now.getTime() - 6 * 24 * 60 * 60 * 1000; // 6 days cutoff as per your logic
 
   console.log(`⏰ Cutoff time (ms): ${cutoff} -> ${new Date(cutoff).toISOString()}`);

@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: '0 1 * * *'  # Runs every day at 9:00 AM Asia/Manila (UTC+8)
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no real payouts sent)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: write  # Required to commit and push changes
@@ -39,8 +48,10 @@ jobs:
           HIVE_USER: ${{ secrets.HIVE_USER }}
           ACTIVE_KEY: ${{ secrets.ACTIVE_KEY }}
           DELEGATION_WEBHOOK_URL: ${{ secrets.DELEGATION_WEBHOOK_URL }}
+          IS_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
 
       - name: Commit and push updated reward and log files
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
