@@ -463,6 +463,7 @@ function logFailedPayout(delegator, amount, error) {
 async function retryFailedPayouts() {
   const failedPayouts = loadFailedPayouts();
   const updatedFailedPayouts = {};
+  const rewardCache = loadRewardCache();
   let totalRetried = 0;
   let totalSuccessful = 0;
   let totalFailed = 0;
@@ -483,6 +484,16 @@ async function retryFailedPayouts() {
         await sendPayout(delegator, amount);
         totalSuccessful++;
         console.log(`✅ Successfully retried payout to @${delegator}: ${amount.toFixed(10)} HIVE`);
+
+        // Subtract from reward cache to avoid double payment in main loop
+        if (rewardCache[delegator]) {
+          rewardCache[delegator] = Math.max(0, parseFloat((rewardCache[delegator] - amount).toFixed(10)));
+          if (rewardCache[delegator] < MIN_PAYOUT) {
+            delete rewardCache[delegator];
+          }
+          saveRewardCache(rewardCache);
+          console.log(`📦 Reduced cache for @${delegator} by ${amount.toFixed(10)} HIVE`);
+        }
 
         const logLine = `${new Date().toISOString()} - 🔄 Retry successful: ${amount.toFixed(10)} HIVE to @${delegator} (original failure: ${timestamp})\n`;
         fs.appendFileSync(PAYOUT_LOG_FILE, logLine);
