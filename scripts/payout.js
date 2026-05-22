@@ -160,7 +160,7 @@ async function pickWorkingNode() {
         });
       }), `Testing API node ${url}`, 2);
 
-      console.log(`✅ Using Hive API node: ${url}`);
+      console.log(`✅ Using Hive API node: ${CURRENT_NODE}`);
       return;
     } catch (err) {
       console.warn(`❌ Node ${url} failed health check: ${err.message}`);
@@ -335,6 +335,35 @@ function vestsToHP(vests, totalVestingFundHive, totalVestingShares) {
   return (vests * totalVestingFundHive) / totalVestingShares;
 }
 
+async function validateActiveKeyMatchesAccount() {
+  let activePublicKey;
+  try {
+    activePublicKey = hive.auth.wifToPublic(ACTIVE_KEY);
+  } catch (error) {
+    throw new Error(`ACTIVE_KEY could not be converted to a Hive public key: ${error.message || error}`);
+  }
+
+  const account = await withRetry(
+    () => new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('API timeout')), API_TIMEOUT_MS);
+      hive.api.getAccounts([HIVE_USER], (err, res) => {
+        clearTimeout(timeout);
+        if (err) return reject(err);
+        if (!res || !res[0]) return reject(new Error(`Hive account @${HIVE_USER} was not found`));
+        resolve(res[0]);
+      });
+    }),
+    `Validating ACTIVE_KEY for @${HIVE_USER}`
+  );
+
+  const activeKeys = ((account.active && account.active.key_auths) || []).map(([key]) => key);
+  if (!activeKeys.includes(activePublicKey)) {
+    throw new Error(`ACTIVE_KEY does not match @${HIVE_USER}'s active authority. Derived public key ${activePublicKey}, but active keys are: ${activeKeys.join(', ') || 'none'}. Update GitHub secret ACTIVE_KEY with the private ACTIVE key for @${HIVE_USER}.`);
+  }
+
+  console.log(`🔐 ACTIVE_KEY verified for @${HIVE_USER}`);
+}
+
 /**
  * sendPayout: wraps hive.broadcast.transfer with retry via withRetry.
  * We consider transfer errors with 5xx / transient network errors retriable.
@@ -471,7 +500,7 @@ async function retryFailedPayouts() {
           console.log(`🚫 Max retries reached for @${delegator}, giving up`);
           const logLine = `${new Date().toISOString()} - 🚫 Max retries reached: ${amount.toFixed(10)} HIVE to @${delegator} (original failure: ${timestamp})\n`;
           fs.appendFileSync(PAYOUT_LOG_FILE, logLine);
-          sendWebhookMessage(`🚫 Max retries reached for @${delegator}: ${amount.toFixed(10)} HIVE — giving up`, DELEGATION_WEBHOOK_URL);
+          sendWebhookMessage(`Max retries reached for @${delegator}: ${amount.toFixed(10)} HIVE - giving up`, DELEGATION_WEBHOOK_URL);
         }
       }
     }
@@ -556,6 +585,7 @@ async function distributeRewards() {
 
   // Ensure we have a working node
   await pickWorkingNode();
+  await validateActiveKeyMatchesAccount();
 
   // Retry any failed payouts first
   await retryFailedPayouts();
