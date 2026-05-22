@@ -181,13 +181,25 @@ function loadDelegationHistory() {
 
 async function getCurationRewards() {
   const phTz = 'Asia/Manila';
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: phTz }));
 
-  // curation window: 8:00 AM yesterday to 7:59:59.999 AM today
+  // curation window: 8:00 AM yesterday to 7:59:59.999 AM today (Manila time, UTC+8)
+  const now = new Date();
+  
+  // Get current Manila time hour (0-23)
+  const manilaHour = (now.getUTCHours() + 8) % 24;
+  
+  // Set end boundary to 8 AM Manila time today
   const end = new Date(now);
-  end.setHours(8, 0, 0, 0);
+  end.setUTCHours(0, 0, 0, 0);  // Start of today UTC midnight
+  
+  // 8 AM Manila = 00:00 UTC on the same calendar day in Manila
+  // If current Manila time is before 8 AM, use yesterday's boundary
+  if (manilaHour < 8) {
+    end.setUTCDate(end.getUTCDate() - 1);
+  }
+  
   const start = new Date(end);
-  start.setDate(start.getDate() - 1);
+  start.setUTCDate(start.getUTCDate() - 1);
 
   const fromTime = start.getTime();
   const toTime = end.getTime();
