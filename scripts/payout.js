@@ -347,10 +347,10 @@ async function sendPayout(to, amount) {
     day: 'numeric'
   });
 
-  const memo = `Thank you for your delegation to @${HIVE_USER} — ${phDate}`;
+  const memo = `Thank you for your delegation to @${HIVE_USER} - ${phDate}`;
 
   if (IS_DRY_RUN) {
-    console.log(`🧪 DRY-RUN: Would send ${amount.toFixed(3)} HIVE to @${to} — ${memo}`);
+    console.log(`🧪 DRY-RUN: Would send ${amount.toFixed(3)} HIVE to @${to} - ${memo}`);
     return Promise.resolve();
   }
 
