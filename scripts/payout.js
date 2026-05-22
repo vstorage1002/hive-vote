@@ -66,7 +66,7 @@ function sendWebhookMessage(content, url) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Content-Length': data.length
+      'Content-Length': Buffer.byteLength(data)
     }
   };
 
@@ -428,7 +428,7 @@ function logFailedPayout(delegator, amount, error) {
 
   saveFailedPayouts(failedPayouts);
   console.log(`📝 Logged failed payout for @${delegator}: ${amount.toFixed(10)} HIVE`);
-  sendWebhookMessage(`❌ Failed payout logged for @${delegator}: ${amount.toFixed(10)} HIVE — ${error.message || error}`, DELEGATION_WEBHOOK_URL);
+  sendWebhookMessage(`Failed payout logged for @${delegator}: ${amount.toFixed(10)} HIVE - ${error.message || error}`, DELEGATION_WEBHOOK_URL);
 }
 
 async function retryFailedPayouts() {

@@ -60,6 +60,7 @@ jobs:
           if [ -f ui/payout.log ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT ui/payout.log"; fi
           if [ -f delegation_snapshot.json ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT delegation_snapshot.json"; fi
           if [ -f scripts/delegation_history.json ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT scripts/delegation_history.json"; fi
+          if [ -f ui/failed_payouts.json ]; then FILES_TO_COMMIT="$FILES_TO_COMMIT ui/failed_payouts.json"; fi
           if [ -n "$FILES_TO_COMMIT" ]; then
             git add $FILES_TO_COMMIT
             git commit -m "🤖 Update reward data and logs [auto]" || echo "No changes to commit"
