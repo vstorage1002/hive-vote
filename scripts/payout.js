@@ -486,6 +486,23 @@ function loadPayoutLedger() {
 }
 
 function savePayoutLedger(ledger) {
+  // Clean up old entries (older than 30 days) to prevent unbounded growth
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const originalCount = ledger.payouts.length;
+  
+  ledger.payouts = ledger.payouts.filter(entry => {
+    const entryDate = new Date(entry.createdAt);
+    // Keep entries less than 30 days old, or failed entries less than 7 days old
+    if (entry.status === 'failed') {
+      return entryDate > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    }
+    return entryDate > thirtyDaysAgo;
+  });
+  
+  if (ledger.payouts.length < originalCount) {
+    console.log(`🧹 Cleaned ${originalCount - ledger.payouts.length} old ledger entries`);
+  }
+  
   // Atomic write: write to temp file then rename
   const tempFile = PAYOUT_LEDGER_FILE + '.tmp';
   fs.writeFileSync(tempFile, JSON.stringify(ledger, null, 2));
@@ -660,12 +677,25 @@ async function recoverPendingPayouts() {
   
   console.log(`\n🔍 Found ${pendingPayouts.length} pending payouts from previous run. Recovering...`);
   
+  const rewardCache = loadRewardCache();
+  
   for (const entry of pendingPayouts) {
     console.log(`📋 Recovering: ${entry.amount.toFixed(3)} HIVE to @${entry.delegator} (created: ${entry.createdAt})`);
     
     try {
       await sendPayout(entry.delegator, entry.amount);
       updatePayoutLedgerStatus(ledger, entry.id, 'sent', null, null);
+      
+      // Subtract from reward cache to avoid double payment
+      if (rewardCache[entry.delegator]) {
+        rewardCache[entry.delegator] = Math.max(0, parseFloat((rewardCache[entry.delegator] - entry.amount).toFixed(10)));
+        if (rewardCache[entry.delegator] < MIN_PAYOUT) {
+          delete rewardCache[entry.delegator];
+        }
+        saveRewardCache(rewardCache);
+        console.log(`📦 Reduced cache for @${entry.delegator} by ${entry.amount.toFixed(3)} HIVE`);
+      }
+      
       console.log(`✅ Recovered payout to @${entry.delegator}: ${entry.amount.toFixed(3)} HIVE`);
       sendWebhookMessage(`✅ Recovered payout: ${entry.amount.toFixed(3)} HIVE to @${entry.delegator}`, DELEGATION_WEBHOOK_URL);
     } catch (error) {
